@@ -3,6 +3,8 @@ render_cube_headless
 ====================
 
 This example demonstrates how to render a rotating colored cube using a headless EGL context and record the frames to a video file.
+
+Unfortunately, EGL is not supported on Windows with PyOpenGL at the moment. Please run this example on Linux or macOS.
 """
 
 # isort: skip_file
@@ -17,6 +19,9 @@ os.environ["PYOPENGL_PLATFORM"] = "egl"  # Make sure to set 'PYOPENGL_PLATFORM' 
 import ctypes
 import math
 import platform
+
+if platform.system() == "Windows":
+    raise RuntimeError("EGL is not supported on Windows with PyOpenGL. Please run this example on Linux or macOS.")
 
 import click
 import cube_object

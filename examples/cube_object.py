@@ -3,8 +3,7 @@ import platform
 import numpy as np
 import OpenGL.GL as gl
 import pyglm.glm as glm
-
-import pyglrec
+import shader
 
 # --------------------------------------------------------------------------------------------
 # OpenGL version and GLSL version settings
@@ -19,82 +18,77 @@ else:
 
 
 class CubeObject:
-    # --------------------------------------------------------------------------------------------
-    # Shader sources
-
-    VERTEX_SHADER_SRC = GLSL_VERSION + """\n\n
-    layout(location = 0) in vec3 in_position;
-    layout(location = 1) in vec3 in_color;
-
-    out vec3 frag_color;
-
-    uniform mat4 u_mvp_mat;
-
-    void main() {
-        gl_Position = u_mvp_mat * vec4(in_position, 1.0);
-        frag_color = in_color;
-    }
-    """
-
-    FRAGMENT_SHADER_SRC = GLSL_VERSION + """\n\n
-    in vec3 frag_color;
-
-    out vec4 out_color;
-
-    void main() {
-        out_color = vec4(frag_color, 1.0);
-    }
-    """
-
     def __init__(self):
         """Initialize the cube object by setting up shaders and geometry. This function must be called within a valid OpenGL context."""
 
         # --------------------------------------------------------------------------------------------
         # Build shader program
 
-        self.shader_program = pyglrec.shader.build_shader_program(self.VERTEX_SHADER_SRC, self.FRAGMENT_SHADER_SRC)
-        self.mvp_mat_loc = gl.glGetUniformLocation(self.shader_program, "u_mvp_mat")
+        self.shader = shader.ObjectShader()
 
         # --------------------------------------------------------------------------------------------
         # Create cube geometry
 
-        vertex_coords = np.array([
-            # Front face
-            -0.5, -0.5,  0.5,
-            0.5, -0.5,  0.5,
-            0.5,  0.5,  0.5,
-            -0.5,  0.5,  0.5,
-            # Back face
-            -0.5, -0.5, -0.5,
-            0.5, -0.5, -0.5,
-            0.5,  0.5, -0.5,
-            -0.5,  0.5, -0.5,
+        positions = np.array([
+            [-1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+            [-1.0, -1.0, 1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 1.0, 1.0],
+        ], dtype=np.float32) * 0.5
+        colors = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 1.0, 0.0],
+            [0.0, 1.0, 1.0],
+            [1.0, 0.0, 1.0],
         ], dtype=np.float32)
-
-        vertex_colors = np.array([
-            # Front face (red)
-            1.0, 0.0, 0.0,
-            1.0, 0.0, 0.0,
-            1.0, 0.0, 0.0,
-            1.0, 0.0, 0.0,
-            # Back face (green)
-            0.0, 1.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 1.0, 0.0,
-            0.0, 1.0, 0.0,
-        ], dtype=np.float32)
+        normals = np.array([
+            [1.0, 0.0, 0.0],   # 0
+            [0.0, 1.0, 0.0],   # 1
+            [0.0, 0.0, 1.0],   # 2
+            [0.0, 0.0, -1.0],  # 3
+            [0.0, -1.0, 0.0],  # 4
+            [-1.0, 0.0, 0.0],  # 5
+        ])
+        faces = np.array([
+            [7, 4, 1],
+            [7, 1, 6],
+            [2, 4, 7],
+            [2, 7, 5],
+            [5, 7, 6],
+            [5, 6, 3],
+            [4, 2, 0],
+            [4, 0, 1],
+            [3, 6, 1],
+            [3, 1, 0],
+            [2, 5, 3],
+            [2, 3, 0]
+        ], dtype=np.uint32)
 
         # Create interleaved vertex data
-        vertex_data = np.hstack((vertex_coords.reshape(-1, 3), vertex_colors.reshape(-1, 3))).flatten()
+        vertex_data = np.zeros((faces.shape[0] * 3, 3 + 3 + 3), dtype=np.float32)
+        indices = np.zeros((faces.shape[0] * 3,), dtype=np.uint32)
 
-        indices = np.array([
-            0, 1, 2, 2, 3, 0,       # Front face
-            4, 5, 6, 6, 7, 4,       # Back face
-            0, 4, 7, 7, 3, 0,       # Left face
-            1, 5, 6, 6, 2, 1,       # Right face
-            3, 2, 6, 6, 7, 3,       # Top face
-            0, 1, 5, 5, 4, 0        # Bottom face
-        ], dtype=np.uint32)
+        for i in range(6):
+            for j in range(3):
+                pos = positions[faces[i * 2 + 0][j]]
+                vertex_data[i * 6 + j, 0:3] = pos
+                vertex_data[i * 6 + j, 3:6] = colors[i]
+                vertex_data[i * 6 + j, 6:9] = normals[i]
+                indices[i * 6 + j] = i * 6 + j
+            for j in range(3):
+                pos = positions[faces[i * 2 + 1][j]]
+                vertex_data[i * 6 + 3 + j, 0:3] = pos
+                vertex_data[i * 6 + 3 + j, 3:6] = colors[i]
+                vertex_data[i * 6 + 3 + j, 6:9] = normals[i]
+                indices[i * 6 + 3 + j] = i * 6 + 3 + j
+
+        index_data = np.array(indices, dtype=np.uint32)
 
         # Allocate VAO and EBO
 
@@ -107,40 +101,57 @@ class CubeObject:
         gl.glBufferData(gl.GL_ARRAY_BUFFER, vertex_data.nbytes, vertex_data, gl.GL_STATIC_DRAW)
 
         gl.glEnableVertexAttribArray(0)
-        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, (3 + 3) * vertex_data.itemsize, gl.ctypes.c_void_p(0))
+        gl.glVertexAttribPointer(0, 3, gl.GL_FLOAT, gl.GL_FALSE, (3 + 3 + 3) * vertex_data.itemsize, gl.ctypes.c_void_p(0))
 
         gl.glEnableVertexAttribArray(1)
-        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, (3 + 3) * vertex_data.itemsize, gl.ctypes.c_void_p(3 * vertex_data.itemsize))
+        gl.glVertexAttribPointer(1, 3, gl.GL_FLOAT, gl.GL_FALSE, (3 + 3 + 3) * vertex_data.itemsize, gl.ctypes.c_void_p(3 * vertex_data.itemsize))
+
+        gl.glEnableVertexAttribArray(2)
+        gl.glVertexAttribPointer(2, 3, gl.GL_FLOAT, gl.GL_FALSE, (3 + 3 + 3) * vertex_data.itemsize, gl.ctypes.c_void_p((3 + 3) * vertex_data.itemsize))
 
         ebo = gl.glGenBuffers(1)
         gl.glBindBuffer(gl.GL_ELEMENT_ARRAY_BUFFER, ebo)
 
-        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, indices.nbytes, indices, gl.GL_STATIC_DRAW)
+        gl.glBufferData(gl.GL_ELEMENT_ARRAY_BUFFER, index_data.nbytes, index_data, gl.GL_STATIC_DRAW)
 
         gl.glBindVertexArray(0)
 
-        self.num_indices = len(indices)
+        self.num_indices = len(index_data)
 
     def dispose(self) -> None:
         """Gracefully delete OpenGL resources."""
-        gl.glDeleteProgram(self.shader_program)
+
+        self.shader.dispose()
         gl.glDeleteVertexArrays(1, [self.vao])
 
-    def draw(self, mvp_mat: glm.mat4) -> None:
+    def draw(
+        self,
+        mvp_mat: glm.mat4,
+        mv_mat: glm.mat4,
+        normal_mat: glm.mat3,
+        light_pos_camera_space: glm.vec3,
+    ) -> None:
         """Draw the cube with the given MVP matrix.
 
         Parameters
         ----------
         mvp_mat : glm.mat4
             The Model-View-Projection matrix to use for rendering.
+        mv_mat : glm.mat4
+            The Model-View matrix to use for rendering.
+        normal_mat : glm.mat3
+            The Normal matrix to use for rendering.
+        light_pos_camera_space : glm.vec3
+            The light position in camera space.
         """
 
-        gl.glUseProgram(self.shader_program)
-
-        gl.glUniformMatrix4fv(self.mvp_mat_loc, 1, gl.GL_FALSE, glm.value_ptr(mvp_mat))
-
-        gl.glBindVertexArray(self.vao)
-        gl.glDrawElements(gl.GL_TRIANGLES, self.num_indices, gl.GL_UNSIGNED_INT, None)
-        gl.glBindVertexArray(0)
-
-        gl.glUseProgram(0)
+        with self.shader.ctx(
+            rendering_type=shader.ObjectShader.RenderingType.SHADING_COLOR,
+            mvp_mat=mvp_mat,
+            mv_mat=mv_mat,
+            normal_mat=normal_mat,
+            light_pos_camera_space=light_pos_camera_space,
+        ):
+            gl.glBindVertexArray(self.vao)
+            gl.glDrawElements(gl.GL_TRIANGLES, self.num_indices, gl.GL_UNSIGNED_INT, None)
+            gl.glBindVertexArray(0)

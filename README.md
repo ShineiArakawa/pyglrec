@@ -84,10 +84,12 @@ recorder.finalize("outputs/demo.mp4")
 Install the optional dependencies, then run:
 
 ```sh
-uv run python examples/render_cube.py --help
+python examples/render_cube.py --help
 
-uv run python examples/render_cube.py            # Record with CPU recorder
-uv run python examples/render_cube.py --nvenc    # Record with NVENC recorder
+python examples/render_cube.py            # Record with CPU recorder
+python examples/render_cube.py --nvenc    # Record with NVENC recorder
+
+python examples/render_cube_headless.py   # Render headless by EGL (only on Linux or macOS)
 ```
 
 Key flags:

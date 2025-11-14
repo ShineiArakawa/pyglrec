@@ -137,6 +137,8 @@ def main(**args):
 
     proj_mat = perspective(window_width / window_height)
 
+    light_pos = glm.vec3(10.0, 10.0, 10.0)
+
     # --------------------------------------------------------------------------------------------
     # Key callback
 
@@ -189,7 +191,9 @@ def main(**args):
         if (cur_time - prev_time) > (1.0 / args.fps_limit):
             # Compute MVP matrix
             model_mat = model_trans_mat * model_rot_mat * model_scale_mat
-            mvp_mat = proj_mat * view_mat * model_mat
+            mv_mat = view_mat * model_mat
+            mvp_mat = proj_mat * mv_mat
+            light_pos_camera_space = glm.vec3(view_mat * glm.vec4(light_pos, 1.0))
 
             # First render pass: Render to FBO
             with recorder.record():
@@ -199,7 +203,7 @@ def main(**args):
                 gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 
                 # Draw cube
-                cube_obj.draw(mvp_mat)
+                cube_obj.draw(mvp_mat, mv_mat, glm.transpose(glm.inverse(glm.mat3(mv_mat))), light_pos_camera_space)
 
             # Second render pass: Render FBO texture to default framebuffer
             quad_obj.draw(recorder.texture_id, window_width, window_height)

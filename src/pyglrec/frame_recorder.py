@@ -36,7 +36,7 @@ class UncompressedFrameCPURecorder:
         self,
         width: int,
         height: int,
-        fps: int = 30,
+        fps: int = 60,
         bitrate: str = '30M',
         cache_size: int = 512
     ):
@@ -49,7 +49,7 @@ class UncompressedFrameCPURecorder:
         height : int
             The height of the frames to record.
         fps : int, optional
-            The frame rate of the recording, by default 30.
+            The frame rate of the recording, by default 60.
         bitrate : str, optional
             The target bitrate for the output video file, by default '30M'.
         cache_size : int, optional
@@ -219,11 +219,12 @@ class NVENCFrameRecorder:
         self,
         width: int,
         height: int,
-        fps: int = 30,
+        fps: int = 60,
         codec: typing.Literal['h264', 'hevc'] = 'hevc',
         preset: typing.Literal['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] | None = None,
-        avg_bitrate: int = 20_000_000,  # 20 Mbps
-        max_bitrate: int = 30_000_000,  # 30 Mbps
+        avg_bitrate: int | str = '20M',  # 20 Mbps
+        max_bitrate: int | str = '30M',  # 30 Mbps
+        rate_control_mode: typing.Literal['cbr', 'vbr', 'constqp'] = 'vbr',
     ):
         """Initialize the NVENC frame recorder to record OpenGL frames. The recorder uses CUDA-OpenGL interop to efficiently transfer frame data from OpenGL to CUDA for encoding without touching the system memory.
 
@@ -234,7 +235,7 @@ class NVENCFrameRecorder:
         height : int
             The height of the frames to record.
         fps : int, optional
-            The frame rate of the recording, by default 30.
+            The frame rate of the recording, by default 60.
         codec : typing.Literal['h264', 'hevc'], optional
             The codec to use for encoding ('h264' or 'hevc'), by default 'hevc'.
         preset : typing.Literal['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] | None,
@@ -243,6 +244,8 @@ class NVENCFrameRecorder:
             The average bitrate for encoding in bits per second, by default 20_000_000 (20 Mbps).
         max_bitrate : int, optional
             The maximum bitrate for encoding in bits per second, by default 30_000_000 (30 Mbps).
+        rate_control_mode : typing.Literal['cbr', 'vbr', 'constqp'], optional
+            The rate control mode ('cbr', 'vbr', or 'constqp'), by default 'vbr'.
 
         Raises
         ------
@@ -268,7 +271,7 @@ class NVENCFrameRecorder:
             raise RuntimeError("CUDA-OpenGL interop plugin is not available. Check if 'nvcc' is installed and configured correctly.")
 
         self._frame_buffer = frame_buffer.FrameBuffer(width, height)
-        
+
         # Get and set CUDA device for the current OpenGL context
         cuda_device_id = int(self._plugin.get_cuda_device_for_current_OpenGL_context())
         self._plugin.set_cuda_device_for_current_OpenGL_context(cuda_device_id)
@@ -289,11 +292,11 @@ class NVENCFrameRecorder:
             # Optional parameters (See "https://docs.nvidia.com/video-technologies/pynvvideocodec/pdf/PyNvVideoCodec_API_ProgGuide.pdf" for details)
             bitrate=avg_bitrate,                        # Bitrate
             fps=fps,                                    # Frames per second
-            tuning_info='high_quality',                 # Tuning info ('high_quality', 'low_latency', 'ultra_low_latency', 'lossless')
+            tuning_info='lossless',                     # Tuning info ('high_quality', 'low_latency', 'ultra_low_latency', 'lossless')
             maxbitrate=max_bitrate,                     # Maximum bitrate
             vbvinit=avg_bitrate,                        # Initial VBV buffer size
             vbvbufsize=avg_bitrate,                     # VBV buffer size
-            rc='vbr',                                   # Rate control mode ('cbr', 'constqp', 'vbr')
+            rc=rate_control_mode,                       # Rate control mode ('cbr', 'constqp', 'vbr')
             **encoder_opts
         )
 

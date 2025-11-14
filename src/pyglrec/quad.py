@@ -43,6 +43,8 @@ class Quad:
     """
 
     def __init__(self):
+        """Initialize the quad by setting up shaders and geometry. This function must be called within a valid OpenGL context."""
+
         # Create shader program for rendering quad
         self._quad_shader = shader.build_shader_program(self.QUAD_VERTEX_SHADER_SRC, self.QUAD_FRAGMENT_SHADER_SRC)
 
@@ -81,6 +83,12 @@ class Quad:
         gl.glBindVertexArray(0)
 
         self._tex_loc = gl.glGetUniformLocation(self._quad_shader, "u_texture")
+
+    def dispose(self) -> None:
+        """Gracefully delete OpenGL resources associated with the quad."""
+
+        gl.glDeleteVertexArrays(1, [self._quad_vao])
+        gl.glDeleteProgram(self._quad_shader)
 
     def draw(self, tex_id: int, width: int, height: int) -> None:
         """Draw the quad with the given texture.

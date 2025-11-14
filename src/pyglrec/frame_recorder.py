@@ -40,6 +40,29 @@ class UncompressedFrameCPURecorder:
         bitrate: str = '30M',
         cache_size: int = 512
     ):
+        """Initialize the uncompressed frame recorder to record OpenGL frames. The recorder reads back frame data from the GPU to the CPU and saves them as a video file using FFmpeg.
+
+        Parameters
+        ----------
+        width : int
+            The width of the frames to record.
+        height : int
+            The height of the frames to record.
+        fps : int, optional
+            The frame rate of the recording, by default 30.
+        bitrate : str, optional
+            The target bitrate for the output video file, by default '30M'.
+        cache_size : int, optional
+            The number of frames to cache in memory before saving to disk, by default 512.
+
+        Example
+        -------
+        >>> recorder = UncompressedFrameCPURecorder(width=1920, height=1080, fps=30)
+        >>> with recorder.record():
+        ...     # OpenGL drawing calls here
+        >>> recorder.finalize("output.mp4")
+        """
+
         self._fps = fps
         self._bitrate = bitrate
 
@@ -202,6 +225,38 @@ class NVENCFrameRecorder:
         avg_bitrate: int = 20_000_000,  # 20 Mbps
         max_bitrate: int = 30_000_000,  # 30 Mbps
     ):
+        """Initialize the NVENC frame recorder to record OpenGL frames. The recorder uses CUDA-OpenGL interop to efficiently transfer frame data from OpenGL to CUDA for encoding without touching the system memory.
+
+        Parameters
+        ----------
+        width : int
+            The width of the frames to record.
+        height : int
+            The height of the frames to record.
+        fps : int, optional
+            The frame rate of the recording, by default 30.
+        codec : typing.Literal['h264', 'hevc'], optional
+            The codec to use for encoding ('h264' or 'hevc'), by default 'hevc'.
+        preset : typing.Literal['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] | None,
+            The NVENC preset to use ('P1' to 'P7'), by default None.
+        avg_bitrate : int, optional
+            The average bitrate for encoding in bits per second, by default 20_000_000 (20 Mbps).
+        max_bitrate : int, optional
+            The maximum bitrate for encoding in bits per second, by default 30_000_000 (30 Mbps).
+
+        Raises
+        ------
+        RuntimeError
+            If the CUDA-OpenGL interop plugin is not available.
+
+        Example
+        -------
+        >>> recorder = NVENCFrameRecorder(width=1920, height=1080, fps=30, codec='h264')
+        >>> with recorder.record():
+        ...     # OpenGL drawing calls here
+        >>> recorder.finalize("output.mp4")
+        """
+
         self._width = width
         self._height = height
         self._fps = fps
@@ -251,6 +306,7 @@ class NVENCFrameRecorder:
         if self._annex_b_file:
             self._annex_b_file.close()
             try:
+                # Cleanup the temporary file
                 os.remove(self._annex_b_file.name)
                 self._annex_b_file = None
             except OSError:
@@ -323,6 +379,7 @@ class NVENCFrameRecorder:
 
         # Ensure all data is written to the temporary file
         self._annex_b_file.flush()
+        self._annex_b_file.close()  # Close to ensure data is written
 
         # Create output directory if it doesn't exist
         out_file.parent.mkdir(parents=True, exist_ok=True)

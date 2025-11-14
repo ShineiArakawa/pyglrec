@@ -1,0 +1,299 @@
+"""
+render_cube_headless
+====================
+
+This example demonstrates how to render a rotating colored cube using a headless EGL context and record the frames to a video file.
+"""
+
+# isort: skip_file
+# autopep8: off
+
+import os
+
+import tqdm
+
+os.environ["PYOPENGL_PLATFORM"] = "egl"  # Make sure to set 'PYOPENGL_PLATFORM' before importing OpenGL
+
+import ctypes
+import math
+import platform
+
+import click
+import cube_object
+import OpenGL.EGL as egl
+import OpenGL.GL as gl
+import OpenGL.platform as gl_platform
+import pyglm.glm as glm
+
+import pyglrec
+
+# autopep8: on
+
+print("\n[PyOpenGL Platform Info]")
+print("    PyOpenGL platform :", gl_platform.PLATFORM)
+print("    Platform class    :", gl_platform.PLATFORM.__class__.__name__)
+print("")
+
+# --------------------------------------------------------------------------------------------
+# OpenGL version and GLSL version settings
+
+if platform.system() == "Darwin":
+    # On macOS, OpenGL 4.1 is the highest supported version
+    OPENGL_VERSION_MAJOR = 4
+    OPENGL_VERSION_MINOR = 1
+    GLSL_VERSION = "#version 410 core"
+else:
+    OPENGL_VERSION_MAJOR = 4
+    OPENGL_VERSION_MINOR = 6
+    GLSL_VERSION = "#version 460 core"
+
+# --------------------------------------------------------------------------------------------
+# Shader sources
+
+VERTEX_SHADER_SRC = GLSL_VERSION + """\n\n
+layout(location = 0) in vec3 in_position;
+layout(location = 1) in vec3 in_color;
+
+out vec3 frag_color;
+
+uniform mat4 u_mvp_mat;
+
+void main() {
+    gl_Position = u_mvp_mat * vec4(in_position, 1.0);
+    frag_color = in_color;
+}
+"""
+
+FRAGMENT_SHADER_SRC = GLSL_VERSION + """\n\n
+in vec3 frag_color;
+
+out vec4 out_color;
+
+void main() {
+    out_color = vec4(frag_color, 1.0);
+}
+"""
+
+
+# --------------------------------------------------------------------------------------------
+# Utility functions
+
+
+def perspective(aspect: float, fov_deg: float = 45.0,  near: float = 0.1, far: float = 100.0) -> glm.mat4:
+    """Create a perspective projection matrix. This method creates the matrix based on the viewport size.
+
+    Parameters
+    ----------
+    aspect : float
+        Aspect ratio (width / height).
+    fov_deg : float
+        Field of view in degrees. Default is 45.0 degrees.
+    near : float
+        Near clipping plane. Default is 0.1.
+    far : float
+        Far clipping plane. Default is 100.0.
+
+    Returns
+    -------
+    glm.mat4
+        The perspective projection matrix.
+    """
+
+    angle = glm.radians(fov_deg)
+    width, height = None, None
+    if aspect >= 1.0:
+        height = 2.0 * near * math.tan(angle / 2.0)
+        width = height * aspect
+    else:
+        width = 2.0 * near * math.tan(angle / 2.0)
+        height = width / aspect
+
+    depth = far - near
+
+    return glm.mat4(
+        # autopep8: off
+        2.0 * near / width,                       0.0,                                   0.0,   0.0,
+                       0.0,       2.0 * near / height,                                   0.0,   0.0,
+                       0.0,                       0.0,                 -(far + near) / depth,  -1.0,
+                       0.0,                       0.0,             -2.0 * far * near / depth,   0.0,
+        # autopep8: on
+    )
+
+
+# --------------------------------------------------------------------------------------------
+# EGL context creation
+
+
+def create_egl_context(width: int, height: int):
+    # Get EGL display
+    display = egl.eglGetDisplay(egl.EGL_DEFAULT_DISPLAY)
+    if display == egl.EGL_NO_DISPLAY:
+        raise RuntimeError("eglGetDisplay failed")
+
+    # Seup EGL version
+    major, minor = egl.EGLint(), egl.EGLint()
+    if not egl.eglInitialize(display, ctypes.pointer(major), ctypes.pointer(minor)):
+        raise RuntimeError("eglInitialize failed")
+
+    # Choose EGL config
+    config_attribs = [
+        # autopep8: off
+        egl.EGL_SURFACE_TYPE,         egl.EGL_PBUFFER_BIT,
+        egl.EGL_RED_SIZE,             8,
+        egl.EGL_GREEN_SIZE,           8,
+        egl.EGL_BLUE_SIZE,            8,
+        egl.EGL_DEPTH_SIZE,           24,
+        egl.EGL_RENDERABLE_TYPE,      egl.EGL_OPENGL_BIT,
+        egl.EGL_SAMPLE_BUFFERS,       1,
+        egl.EGL_SAMPLES,              4,  # MSAA 4x
+        egl.EGL_NONE,
+        # autopep8: on
+    ]
+    config_attribs = (egl.EGLint * len(config_attribs))(*config_attribs)
+
+    config = egl.EGLConfig()
+    num_configs = egl.EGLint()
+    if not egl.eglChooseConfig(display, config_attribs, ctypes.pointer(config), 1, ctypes.pointer(num_configs)):
+        raise RuntimeError("eglChooseConfig failed")
+    if num_configs.value == 0:
+        raise RuntimeError("no EGL configs")
+
+    # Create EGL pbuffer surface
+    pbuffer_attribs = [
+        egl.EGL_WIDTH,  width,
+        egl.EGL_HEIGHT, height,
+        egl.EGL_NONE,
+    ]
+    pbuffer_attribs = (egl.EGLint * len(pbuffer_attribs))(*pbuffer_attribs)
+
+    surface = egl.eglCreatePbufferSurface(display, config, pbuffer_attribs)
+    if surface == egl.EGL_NO_SURFACE:
+        raise RuntimeError("eglCreatePbufferSurface failed")
+
+    # Bind OpenGL API
+    if not egl.eglBindAPI(egl.EGL_OPENGL_API):
+        raise RuntimeError("eglBindAPI failed")
+
+    # Create EGL context
+    context_attribs = [
+        egl.EGL_CONTEXT_MAJOR_VERSION, OPENGL_VERSION_MAJOR,
+        egl.EGL_CONTEXT_MINOR_VERSION, OPENGL_VERSION_MINOR,
+        egl.EGL_CONTEXT_OPENGL_PROFILE_MASK, egl.EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
+        egl.EGL_NONE,
+    ]
+    context_attribs = (egl.EGLint * len(context_attribs))(*context_attribs)
+
+    context = egl.eglCreateContext(display, config, egl.EGL_NO_CONTEXT, context_attribs)
+    if context == egl.EGL_NO_CONTEXT:
+        raise RuntimeError("eglCreateContext failed")
+
+    # Make context current
+    if not egl.eglMakeCurrent(display, surface, surface, context):
+        raise RuntimeError("eglMakeCurrent failed")
+
+    # Print version info
+    print(f"[OpenGL/EGL Version Info]")
+    print(f"    EGL version     : {major.value}.{minor.value}")
+    print(f"    OpenGL version  : {gl.glGetString(gl.GL_VERSION).decode()}")
+    print(f"    OpenGL vendor   : {gl.glGetString(gl.GL_VENDOR).decode()}")
+    print(f"    OpenGL renderer : {gl.glGetString(gl.GL_RENDERER).decode()}")
+    print(f"    GLSL version    : {gl.glGetString(gl.GL_SHADING_LANGUAGE_VERSION).decode()}")
+    print(f'')
+
+    return display, surface, context
+
+
+@click.command()
+@click.option("--width", default=2560, help="Window width")
+@click.option("--height", default=1440, help="Window height")
+@click.option("--n_frames", default=300, help="Number of frames to render")
+@click.option("--out_dir", default="./outputs/egl/render_cube", help="Output directory to save the recorded video")
+@click.option("--fps", default=30.0, help="Frame rate limit")
+@click.option("--rot_speed", default=10.0, help="Cube rotation speed in degrees per frame")
+@click.option("--nvenc", is_flag=True, help="Enable NVENC frame recording (requires NVIDIA GPU)")
+def main(**args):
+    """Render a rotating colored cube using headless EGL context and record the frames to a video file.
+    """
+
+    args = pyglrec.EasyDict(args)
+
+    window_width = args.width
+    window_height = args.height
+
+    # ----------------------------------------------------------------------------------------------------------------------------------
+    # Create EGL context
+
+    display, surface, context = create_egl_context(window_width, window_height)
+
+    # --------------------------------------------------------------------------------------------
+    # Camera setup
+
+    camera_pos = glm.vec3(5.0, 0.0, 0.0)
+    camera_lookat = glm.vec3(0.0, 0.0, 0.0)
+    camera_up = glm.vec3(0.0, 1.0, 0.0)
+    view_mat = glm.lookAt(camera_pos, camera_lookat, camera_up)
+
+    model_rot_mat = glm.mat4(1.0)
+    model_trans_mat = glm.mat4(1.0)
+    model_scale_mat = glm.mat4(1.0)
+
+    proj_mat = perspective(window_width / window_height)
+
+    # --------------------------------------------------------------------------------------------
+    # Create cube object
+
+    cube_obj = cube_object.CubeObject()
+
+    # --------------------------------------------------------------------------------------------
+    # Create recorder
+
+    recorder = (pyglrec.NVENCFrameRecorder if args.nvenc else pyglrec.UncompressedFrameCPURecorder)(window_width, window_height, fps=args.fps)
+
+    # --------------------------------------------------------------------------------------------
+    # Setup states
+
+    gl.glEnable(gl.GL_DEPTH_TEST)   # Enable depth testing
+    gl.glEnable(gl.GL_MULTISAMPLE)  # Enable multisampling on default framebuffer
+
+    # --------------------------------------------------------------------------------------------
+    # Main loop
+
+    rot_axis_in_world_space = glm.normalize(camera_up)
+    rot_quaternion = glm.angleAxis(glm.radians(args.rot_speed), rot_axis_in_world_space)
+    delta_rot_mat = glm.mat4_cast(rot_quaternion)
+
+    for _ in tqdm.trange(args.n_frames, desc='Rendering frames ... ', unit='frame'):
+        # Compute MVP matrix
+        model_mat = model_trans_mat * model_rot_mat * model_scale_mat
+        mvp_mat = proj_mat * view_mat * model_mat
+
+        # Render and record frame
+        with recorder.record():
+            gl.glViewport(0, 0, window_width, window_height)
+
+            gl.glClearColor(0.0, 0.0, 0.0, 1.0)
+            gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+
+            cube_obj.draw(mvp_mat)
+
+        # Animate
+        model_rot_mat = delta_rot_mat * model_rot_mat
+
+    out_file = os.path.join(args.out_dir, 'output_headless_nvenc.mp4' if args.nvenc else 'output_headless.mp4')
+    recorder.finalize(out_file)
+
+    # ----------------------------------------------------------------------------------------------------------------------------------
+    # Cleanup OpenGL resources and EGL context
+
+    cube_obj.dispose()
+
+    egl.eglMakeCurrent(display, egl.EGL_NO_SURFACE, egl.EGL_NO_SURFACE, egl.EGL_NO_CONTEXT)
+    egl.eglDestroyContext(display, context)
+    egl.eglDestroySurface(display, surface)
+    egl.eglTerminate(display)
+
+    print(f'Bye!')
+
+
+if __name__ == "__main__":
+    main()

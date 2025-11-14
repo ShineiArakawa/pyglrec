@@ -87,8 +87,8 @@ def _get_plugin_impl(
     include_dirs = [p for p in include_dirs if p]  # drop missing paths
 
     if system == 'Linux':
-        cflags = ['-O3', '-std=c++17', *extra_cflags]
-        ldflags = ['-lGL', '-lGLEW', '-lEGL'] if ldflags is None else list(ldflags)
+        cflags = ['-O3', '-std=c++17', '-fPIC', *extra_cflags]
+        ldflags = ['-lGL', '-lEGL'] if ldflags is None else list(ldflags)
         shared_ext = '.so'
         cxx = 'g++'
     elif system == 'Darwin':
@@ -303,39 +303,52 @@ def _get_plugin_impl(
     cuda_version = 'nocuda'
     if cuda:
         cuda_path = os.getenv('CUDA_PATH')
-        if cuda_path is not None:
-            if os.path.exists(os.path.join(cuda_path, 'bin', 'nvcc.exe' if system == 'Windows' else 'nvcc')):
-                nvcc = os.path.join(cuda_path, 'bin', 'nvcc.exe' if system == 'Windows' else 'nvcc')
+        if cuda_path is not None and os.path.exists(os.path.join(cuda_path, 'bin', 'nvcc.exe' if system == 'Windows' else 'nvcc')):
+            nvcc = os.path.join(cuda_path, 'bin', 'nvcc.exe' if system == 'Windows' else 'nvcc')
 
-                # As of Python 3.8, cwd and $PATH are no longer searched for DLLs
+            # As of Python 3.8, cwd and $PATH are no longer searched for DLLs
+            if system == 'Windows':
                 os.add_dll_directory(os.path.join(cuda_path, 'bin'))
 
-                # Try to get CUDA version
-                cmd = [nvcc, '--version']
-                try:
-                    output = subprocess.check_output(cmd, universal_newlines=True)
-                    for line in output.split('\n'):
-                        if 'release' in line:
-                            # Like: Cuda compilation tools, release 12.9, V12.9.86
-                            cuda_version = 'cu' + line.strip().split('release')[-1].split(',')[0].strip()
-                            break
-                except Exception:
-                    cuda_version = 'unknown'
+            # Try to get CUDA version
+            cmd = [nvcc, '--version']
+            try:
+                output = subprocess.check_output(cmd, universal_newlines=True)
+                for line in output.split('\n'):
+                    if 'release' in line:
+                        # Like: Cuda compilation tools, release 12.9, V12.9.86
+                        cuda_version = 'cu' + line.strip().split('release')[-1].split(',')[0].strip()
+                        break
+            except Exception:
+                cuda_version = 'unknown'
 
-                # Add CUDA include dir
-                include_dirs.append(os.path.join(cuda_path, 'include'))
+            # Add CUDA include dirs and libraries
+            include_dirs.append(os.path.join(cuda_path, 'include'))
 
-                if system == 'Windows':
-                    cuda_lib_dir = pathlib.Path(cuda_path) / 'lib' / 'x64'
-                    if cuda_lib_dir.exists():
-                        lib_flag = '/LIBPATH:' + str(cuda_lib_dir)
-                        if lib_flag not in ldflags:
-                            ldflags.append(lib_flag)
+            if system == 'Windows':
+                cuda_lib_dir = pathlib.Path(cuda_path) / 'lib' / 'x64'
+                if cuda_lib_dir.exists():
+                    lib_flag = '/LIBPATH:' + str(cuda_lib_dir)
+                    if lib_flag not in ldflags:
+                        ldflags.append(lib_flag)
 
-                    for lib_name in ['cudart.lib', 'cuda.lib']:
-                        default_lib = '/DEFAULTLIB:' + lib_name
-                        if default_lib not in ldflags:
-                            ldflags.append(default_lib)
+                for lib_name in ['cudart.lib', 'cuda.lib']:
+                    default_lib = '/DEFAULTLIB:' + lib_name
+                    if default_lib not in ldflags:
+                        ldflags.append(default_lib)
+            elif system in ('Linux', 'Darwin'):
+                cuda_lib_dir = os.path.join(cuda_path, 'lib64')
+                if os.path.isdir(cuda_lib_dir):
+                    flag = f'-L{cuda_lib_dir}'
+                    if flag not in ldflags:
+                        ldflags.append(flag)
+
+                # Add cudart
+                if '-lcudart' not in ldflags:
+                    ldflags.append('-lcudart')
+                # Add cuda
+                if '-lcuda' not in ldflags:
+                    ldflags.append('-lcuda')
         if nvcc is None:
             raise RuntimeError("CUDA_PATH is not set or nvcc not found in CUDA_PATH/bin")
 
@@ -480,7 +493,6 @@ def get_cuda_plugin():
         )
     except Exception as e:
         print('Failed to build CUDA-GL plugin:', e)
-        print('Images will be uploaded from RAM.')
         return None
 
 # --------------------------------------------------------------------------------------------------------------------------------

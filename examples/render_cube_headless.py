@@ -244,6 +244,8 @@ def main(**args):
 
     proj_mat = perspective(window_width / window_height)
 
+    light_pos = glm.vec3(10.0, 10.0, 10.0)
+
     # --------------------------------------------------------------------------------------------
     # Create cube object
 
@@ -268,9 +270,11 @@ def main(**args):
     delta_rot_mat = glm.mat4_cast(rot_quaternion)
 
     for _ in tqdm.trange(args.n_frames, desc='Rendering frames ... ', unit='frame'):
-        # Compute MVP matrix
+        # Compute transformation matrices
         model_mat = model_trans_mat * model_rot_mat * model_scale_mat
-        mvp_mat = proj_mat * view_mat * model_mat
+        mv_mat = view_mat * model_mat
+        mvp_mat = proj_mat * mv_mat
+        light_pos_camera_space = glm.vec3(view_mat * glm.vec4(light_pos, 1.0))
 
         # Render and record frame
         with recorder.record():
@@ -279,7 +283,8 @@ def main(**args):
             gl.glClearColor(0.0, 0.0, 0.0, 1.0)
             gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
 
-            cube_obj.draw(mvp_mat)
+            # Draw cube
+            cube_obj.draw(mvp_mat, mv_mat, glm.transpose(glm.inverse(glm.mat3(mv_mat))), light_pos_camera_space)
 
         # Animate
         model_rot_mat = delta_rot_mat * model_rot_mat

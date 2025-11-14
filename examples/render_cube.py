@@ -189,7 +189,7 @@ def main(**args):
         # Limit frame rate
         cur_time = time.monotonic()
         if (cur_time - prev_time) > (1.0 / args.fps_limit):
-            # Compute MVP matrix
+            # Compute transformation matrices
             model_mat = model_trans_mat * model_rot_mat * model_scale_mat
             mv_mat = view_mat * model_mat
             mvp_mat = proj_mat * mv_mat

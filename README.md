@@ -1,5 +1,9 @@
 # pyglrec
 
+<video autoplay loop muted playsinline controls style="max-width:100%;height:auto;">
+  <source src="/assets/teaser.mp4" type="video/mp4">
+</video>
+
 pyglrec is a lightweight OpenGL frame recorder for Python. It streams GPU render targets straight into NVENC using a custom CUDA/OpenGL interop plugin, so you can capture headless renders or interactive viewports without round-tripping pixels through the CPU. A CPU path is also available when NVENC hardware is missing.
 
 ## Highlights

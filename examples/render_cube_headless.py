@@ -25,6 +25,7 @@ if platform.system() == "Windows":
 
 import click
 import cube_object
+import gl_utils
 import OpenGL.EGL as egl
 import OpenGL.GL as gl
 import OpenGL.platform as gl_platform
@@ -46,83 +47,9 @@ if platform.system() == "Darwin":
     # On macOS, OpenGL 4.1 is the highest supported version
     OPENGL_VERSION_MAJOR = 4
     OPENGL_VERSION_MINOR = 1
-    GLSL_VERSION = "#version 410 core"
 else:
     OPENGL_VERSION_MAJOR = 4
     OPENGL_VERSION_MINOR = 6
-    GLSL_VERSION = "#version 460 core"
-
-# --------------------------------------------------------------------------------------------
-# Shader sources
-
-VERTEX_SHADER_SRC = GLSL_VERSION + """\n\n
-layout(location = 0) in vec3 in_position;
-layout(location = 1) in vec3 in_color;
-
-out vec3 frag_color;
-
-uniform mat4 u_mvp_mat;
-
-void main() {
-    gl_Position = u_mvp_mat * vec4(in_position, 1.0);
-    frag_color = in_color;
-}
-"""
-
-FRAGMENT_SHADER_SRC = GLSL_VERSION + """\n\n
-in vec3 frag_color;
-
-out vec4 out_color;
-
-void main() {
-    out_color = vec4(frag_color, 1.0);
-}
-"""
-
-
-# --------------------------------------------------------------------------------------------
-# Utility functions
-
-
-def perspective(aspect: float, fov_deg: float = 45.0,  near: float = 0.1, far: float = 100.0) -> glm.mat4:
-    """Create a perspective projection matrix. This method creates the matrix based on the viewport size.
-
-    Parameters
-    ----------
-    aspect : float
-        Aspect ratio (width / height).
-    fov_deg : float
-        Field of view in degrees. Default is 45.0 degrees.
-    near : float
-        Near clipping plane. Default is 0.1.
-    far : float
-        Far clipping plane. Default is 100.0.
-
-    Returns
-    -------
-    glm.mat4
-        The perspective projection matrix.
-    """
-
-    angle = glm.radians(fov_deg)
-    width, height = None, None
-    if aspect >= 1.0:
-        height = 2.0 * near * math.tan(angle / 2.0)
-        width = height * aspect
-    else:
-        width = 2.0 * near * math.tan(angle / 2.0)
-        height = width / aspect
-
-    depth = far - near
-
-    return glm.mat4(
-        # autopep8: off
-        2.0 * near / width,                       0.0,                                   0.0,   0.0,
-                       0.0,       2.0 * near / height,                                   0.0,   0.0,
-                       0.0,                       0.0,                 -(far + near) / depth,  -1.0,
-                       0.0,                       0.0,             -2.0 * far * near / depth,   0.0,
-        # autopep8: on
-    )
 
 
 # --------------------------------------------------------------------------------------------
@@ -214,7 +141,7 @@ def create_egl_context(width: int, height: int):
 @click.option("--n_frames", default=500, help="Number of frames to render")
 @click.option("--out_dir", default="./outputs/render_cube_headless", help="Output directory to save the recorded video")
 @click.option("--fps", default=120.0, help="Frame rate limit")
-@click.option("--rot_speed", default=5.0, help="Cube rotation speed in degrees per frame")
+@click.option("--rot_speed", default=60.0, help="Cube rotation speed in degrees per frame")
 @click.option("--nvenc", is_flag=True, help="Enable NVENC frame recording (requires NVIDIA GPU)")
 @click.option("--bitrate", default='10M', type=str, help="Bitrate for NVENC recorder (in bits per second)")
 def main(**args):
@@ -226,7 +153,7 @@ def main(**args):
     window_width = args.width
     window_height = args.height
 
-    # ----------------------------------------------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------------------------
     # Create EGL context
 
     display, surface, context = create_egl_context(window_width, window_height)
@@ -243,7 +170,7 @@ def main(**args):
     model_trans_mat = glm.mat4(1.0)
     model_scale_mat = glm.mat4(1.0)
 
-    proj_mat = perspective(window_width / window_height)
+    proj_mat = gl_utils.perspective(window_width / window_height)
 
     light_rot_mat = glm.mat4(1.0)
     light_pos = glm.vec3(10.0, 10.0, 10.0)
@@ -288,9 +215,9 @@ def main(**args):
             cube_obj.draw(mvp_mat, mv_mat, glm.transpose(glm.inverse(glm.mat3(mv_mat))), light_pos_camera_space)
 
         # Animate cube
-        angle_x = math.sin(frame_idx * 0.6) * args.rot_speed
-        angle_y = math.sin(frame_idx * 0.9) * args.rot_speed
-        angle_z = math.sin(frame_idx * 1.1) * args.rot_speed
+        angle_x = math.sin(frame_idx / args.fps * 0.6) * args.rot_speed
+        angle_y = math.sin(frame_idx / args.fps * 0.9) * args.rot_speed
+        angle_z = math.sin(frame_idx / args.fps * 1.1) * args.rot_speed
 
         rot_quaternion_x = glm.angleAxis(glm.radians(angle_x), glm.vec3(1.0, 0.0, 0.0))
         rot_quaternion_y = glm.angleAxis(glm.radians(angle_y), glm.vec3(0.0, 1.0, 0.0))
@@ -299,9 +226,9 @@ def main(**args):
         model_rot_mat = glm.mat4_cast(rot_quaternion)
 
         # Also rotate light at different speed
-        angle_x = math.sin(frame_idx * 1.5) * args.rot_speed
-        angle_y = math.sin(frame_idx * 1.8) * args.rot_speed
-        angle_z = math.sin(frame_idx * 2.1) * args.rot_speed
+        angle_x = math.sin(frame_idx / args.fps * 1.5) * args.rot_speed
+        angle_y = math.sin(frame_idx / args.fps * 1.8) * args.rot_speed
+        angle_z = math.sin(frame_idx / args.fps * 2.1) * args.rot_speed
 
         rot_quaternion_x = glm.angleAxis(glm.radians(angle_x), glm.vec3(1.0, 0.0, 0.0))
         rot_quaternion_y = glm.angleAxis(glm.radians(angle_y), glm.vec3(0.0, 1.0, 0.0))
@@ -313,7 +240,7 @@ def main(**args):
     recorder.finalize(out_file)
     print(f'Recorded video saved to: {out_file}')
 
-    # ----------------------------------------------------------------------------------------------------------------------------------
+    # --------------------------------------------------------------------------------------------
     # Cleanup OpenGL resources and EGL context
 
     cube_obj.dispose()

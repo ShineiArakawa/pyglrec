@@ -38,51 +38,6 @@ else:
 
 
 # --------------------------------------------------------------------------------------------
-# Utility functions
-
-
-def perspective(aspect: float, fov_deg: float = 45.0,  near: float = 0.1, far: float = 100.0) -> glm.mat4:
-    """Create a perspective projection matrix. This method creates the matrix based on the viewport size.
-
-    Parameters
-    ----------
-    aspect : float
-        Aspect ratio (width / height).
-    fov_deg : float
-        Field of view in degrees. Default is 45.0 degrees.
-    near : float
-        Near clipping plane. Default is 0.1.
-    far : float
-        Far clipping plane. Default is 100.0.
-
-    Returns
-    -------
-    glm.mat4
-        The perspective projection matrix.
-    """
-
-    angle = glm.radians(fov_deg)
-    width, height = None, None
-    if aspect >= 1.0:
-        height = 2.0 * near * math.tan(angle / 2.0)
-        width = height * aspect
-    else:
-        width = 2.0 * near * math.tan(angle / 2.0)
-        height = width / aspect
-
-    depth = far - near
-
-    return glm.mat4(
-        # autopep8: off
-        2.0 * near / width,                       0.0,                                   0.0,   0.0,
-                       0.0,       2.0 * near / height,                                   0.0,   0.0,
-                       0.0,                       0.0,                 -(far + near) / depth,  -1.0,
-                       0.0,                       0.0,             -2.0 * far * near / depth,   0.0,
-        # autopep8: on
-    )
-
-
-# --------------------------------------------------------------------------------------------
 # Main function
 
 rot_speed = 60.0  # degrees per second
@@ -147,7 +102,7 @@ def main(**args):
     model_trans_mat = glm.mat4(1.0)
     model_scale_mat = glm.mat4(1.0)
 
-    proj_mat = perspective(window_width / window_height)
+    proj_mat = gl_utils.perspective(window_width / window_height)
 
     light_rot_mat = glm.mat4(1.0)
     light_pos = glm.vec3(10.0, 10.0, 10.0)

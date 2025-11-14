@@ -30,7 +30,7 @@ __global__ void rgba_to_nv12_kernel(
   if (x >= width || y >= height) return;
 
   // First element in the row
-  const std::uint8_t* row_base = reinterpret_cast<const std::uint8_t*>(src_rgba) + y * src_pitch;
+  const std::uint8_t* row_base = reinterpret_cast<const std::uint8_t*>(src_rgba) + (height - 1 - y) * src_pitch;
   const uchar4* row = reinterpret_cast<const uchar4*>(row_base);
 
   // RGBA pixel at (x, y)
@@ -58,7 +58,7 @@ __global__ void rgba_to_nv12_kernel(
         continue;
       }
 
-      const std::uint8_t* row_base2 = reinterpret_cast<const std::uint8_t*>(src_rgba) + yy * src_pitch;
+      const std::uint8_t* row_base2 = reinterpret_cast<const std::uint8_t*>(src_rgba) + (height - 1 - yy) * src_pitch;
       const uchar4* row2 = reinterpret_cast<const uchar4*>(row_base2);
 
       for (int dx = 0; dx < 2; ++dx) {

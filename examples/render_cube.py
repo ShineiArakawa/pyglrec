@@ -48,8 +48,9 @@ rot_speed = 60.0  # degrees per second
 @click.option("--width", default=2560, help="Window width")
 @click.option("--height", default=1440, help="Window height")
 @click.option("--out_dir", default="./outputs/render_cube", help="Output directory to save the recorded video")
-@click.option("--fps_limit", default=30.0, help="Frame rate limit")
+@click.option("--fps_limit", default=60.0, help="Frame rate limit")
 @click.option("--nvenc", is_flag=True, help="Enable NVENC frame recording (requires NVIDIA GPU)")
+@click.option("--disabled", is_flag=True, help="Disable frame recording")
 def main(**args):
     """Render a rotating colored cube using OpenGL and record the frames to a video file.
     """
@@ -146,6 +147,24 @@ def main(**args):
     gl.glEnable(gl.GL_MULTISAMPLE)  # Enable multisampling on default framebuffer
 
     # --------------------------------------------------------------------------------------------
+    # Resolve dpi scaling factor
+
+    dpi_scale_x, dpi_scale_y = 1.0, 1.0
+
+    win_x, win_y = glfw.get_window_pos(window)
+    for monitor in glfw.get_monitors():
+        monitor_x0, monitor_y0, monitor_w, monitor_h = glfw.get_monitor_workarea(monitor)
+        monitor_x1 = monitor_x0 + monitor_w
+        monitor_y1 = monitor_y0 + monitor_h
+        if (monitor_x0 <= win_x < monitor_x1) and (monitor_y0 <= win_y < monitor_y1):
+            break
+
+    if monitor is not None:
+        (dpi_scale_x, dpi_scale_y) = glfw.get_monitor_content_scale(monitor)
+        monitor_name = glfw.get_monitor_name(monitor).decode()
+        print(f'You are running on monitor "{monitor_name}" with DPI scale factors ({dpi_scale_x:.2f}, {dpi_scale_y:.2f}). The framebuffer size for rendering is ({window_width}, {window_height}), while the window size is ({int(window_width * dpi_scale_x)}, {int(window_height * dpi_scale_y)}).')
+
+    # --------------------------------------------------------------------------------------------
     # Main loop
 
     start_time = time.monotonic()
@@ -164,7 +183,7 @@ def main(**args):
             light_pos_camera_space = glm.vec3(view_mat * light_rot_mat * glm.vec4(light_pos, 1.0))
 
             # First render pass: Render to FBO
-            with recorder.record():
+            with recorder.record(enabled=(not args.disabled)):
                 gl.glViewport(0, 0, window_width, window_height)
 
                 gl.glClearColor(0.0, 0.0, 0.0, 1.0)
@@ -174,7 +193,7 @@ def main(**args):
                 cube_obj.draw(mvp_mat, mv_mat, glm.transpose(glm.inverse(glm.mat3(mv_mat))), light_pos_camera_space)
 
             # Second render pass: Render FBO texture to default framebuffer
-            quad_obj.draw(recorder.texture_id, window_width, window_height)
+            quad_obj.draw(recorder.texture_id, int(window_width * dpi_scale_x), int(window_height * dpi_scale_y))
 
             # Animate cube
             angle_x = math.sin((cur_time - start_time) * 0.6) * rot_speed

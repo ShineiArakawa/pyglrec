@@ -9,6 +9,7 @@ Recorder classes for OpenGL frame data.
 import contextlib
 import os
 import pathlib
+import platform
 import subprocess
 import tempfile
 import threading
@@ -19,7 +20,11 @@ import imageio
 import imageio_ffmpeg
 import numpy as np
 import OpenGL.GL as gl
-import PyNvVideoCodec as nvcodec
+
+if platform.system() != 'Darwin':
+    import PyNvVideoCodec as nvcodec
+else:
+    nvcodec = None  # NVENC is not supported on macOS
 
 import pyglrec.cuda_gl_interop as cuda_gl_interop
 import pyglrec.frame_buffer as frame_buffer
@@ -130,6 +135,9 @@ class UncompressedFrameCPURecorder:
                     self._saving_thread.start()
 
     def _save_frames_to_disk(self, num: int | None = None) -> None:
+        if num == 0:
+            return
+
         with self._lock:
             num = min(num or self._cache_size, len(self._frame_cache))
             frame_indices = list(self._frame_cache.keys())[:num]
@@ -165,24 +173,28 @@ class UncompressedFrameCPURecorder:
         # Gather all saved .npz files
         npz_files = sorted([f for f in os.listdir(self._tmp_dir.name) if f.endswith('.npz')])
 
-        # Create writer
-        out_file.parent.mkdir(parents=True, exist_ok=True)
+        if len(npz_files) > 0:
+            # Create writer
+            out_file.parent.mkdir(parents=True, exist_ok=True)
 
-        pix_format = 'yuv420p'
-        ffmpeg_args = []
-        ffmpeg_args += ['-g', '1']  # Set GOP size to 1 for lossless encoding
-        ffmpeg_args += ['-color_range', '2']  # Set color range to full
-        ffmpeg_args += ['-movflags', '+write_colr']  # Write color profile
-        ffmpeg_kwargs = dict(bitrate=self._bitrate, pixelformat=pix_format, output_params=ffmpeg_args)
-        writer = imageio.get_writer(str(out_file), format='ffmpeg', mode='I', fps=self._fps, codec='libx265', **ffmpeg_kwargs)
+            pix_format = 'yuv420p'
+            ffmpeg_args = []
+            ffmpeg_args += ['-g', '1']  # Set GOP size to 1 for lossless encoding
+            ffmpeg_args += ['-color_range', '2']  # Set color range to full
+            ffmpeg_args += ['-movflags', '+write_colr']  # Write color profile
+            ffmpeg_kwargs = dict(bitrate=self._bitrate, pixelformat=pix_format, output_params=ffmpeg_args)
+            writer = imageio.get_writer(str(out_file), format='ffmpeg', mode='I', fps=self._fps, codec='libx265', **ffmpeg_kwargs)
 
-        for npz_file in npz_files:
-            data = np.load(os.path.join(self._tmp_dir.name, npz_file))
-            for i in range(len(data.files)):
-                frame = data[f'arr_{i}']
-                writer.append_data(frame)
+            for npz_file in npz_files:
+                data = np.load(os.path.join(self._tmp_dir.name, npz_file))
+                for i in range(len(data.files)):
+                    frame = data[f'arr_{i}']
+                    writer.append_data(frame)
 
-        writer.close()
+            writer.close()
+        else:
+            print("No frames were recorded; skipping video file creation.")
+
 
 # --------------------------------------------------------------------------------------------------------------
 # GPU Frame Recorder enhanced by NVENC
@@ -260,6 +272,10 @@ class NVENCFrameRecorder:
         >>> recorder.finalize("output.mp4")
         """
 
+        # Check if nvcodec is available
+        if nvcodec is None:
+            raise RuntimeError("PyNvVideoCodec is not available. NVENC is not supported on this platform.")
+
         self._width = width
         self._height = height
         self._fps = fps
@@ -282,7 +298,7 @@ class NVENCFrameRecorder:
         if preset is not None:
             encoder_opts.preset = preset  # Preset ('P1' to 'P7')
 
-        self._encoder: nvcodec.PyNvEncoder = nvcodec.CreateEncoder(
+        self._encoder = nvcodec.CreateEncoder(
             gpu_id=cuda_device_id,
             width=width,
             height=height,
@@ -390,26 +406,29 @@ class NVENCFrameRecorder:
         self._annex_b_file.flush()
         self._annex_b_file.close()  # Close to ensure data is written
 
-        # Create output directory if it doesn't exist
-        out_file.parent.mkdir(parents=True, exist_ok=True)
+        if os.path.getsize(self._annex_b_file.name) > 0:
+            # Create output directory if it doesn't exist
+            out_file.parent.mkdir(parents=True, exist_ok=True)
 
-        # Convert the Annex B bitstream to MP4 container using imageio
-        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            # Convert the Annex B bitstream to MP4 container using imageio
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
 
-        cmd = [
-            ffmpeg_exe,
-            '-y',                                     # Overwrite output file if it exists
-            '-r', str(self._fps),                     # Input frame rate
-            '-i', self._annex_b_file.name,            # Input file (Annex B bitstream)
-            '-c:v', 'copy',                           # Copy the video stream without re-encoding
-            '-an',                                    # No audio
-            str(out_file),
-        ]
+            cmd = [
+                ffmpeg_exe,
+                '-y',                                     # Overwrite output file if it exists
+                '-r', str(self._fps),                     # Input frame rate
+                '-i', self._annex_b_file.name,            # Input file (Annex B bitstream)
+                '-c:v', 'copy',                           # Copy the video stream without re-encoding
+                '-an',                                    # No audio
+                str(out_file),
+            ]
 
-        try:
-            subprocess.run(cmd, check=True)
-        except subprocess.CalledProcessError as e:
-            raise RuntimeError(f"FFmpeg failed to convert Annex B bitstream to MP4: {e}") from e
+            try:
+                subprocess.run(cmd, check=True)
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"FFmpeg failed to convert Annex B bitstream to MP4: {e}") from e
+        else:
+            print("No frames were recorded; skipping video file creation.")
 
 
 # --------------------------------------------------------------------------------------------------------------

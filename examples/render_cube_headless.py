@@ -20,8 +20,8 @@ import ctypes
 import math
 import platform
 
-if platform.system() == "Windows":
-    raise RuntimeError("EGL is not supported on Windows with PyOpenGL. Please run this example on Linux or macOS.")
+if platform.system() in ["Windows", "Darwin"]:
+    raise RuntimeError("EGL is not supported on Windows or macOS by default. If you have custom EGL support, please remove this check and try again.")
 
 import click
 import cube_object

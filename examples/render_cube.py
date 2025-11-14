@@ -149,6 +149,7 @@ def main(**args):
 
     proj_mat = perspective(window_width / window_height)
 
+    light_rot_mat = glm.mat4(1.0)
     light_pos = glm.vec3(10.0, 10.0, 10.0)
 
     # --------------------------------------------------------------------------------------------
@@ -191,9 +192,8 @@ def main(**args):
     # --------------------------------------------------------------------------------------------
     # Main loop
 
+    start_time = time.monotonic()
     prev_time = time.monotonic()
-
-    rot_axis_in_world_space = glm.normalize(camera_up)
 
     while not glfw.window_should_close(window):
         glfw.poll_events()
@@ -205,7 +205,7 @@ def main(**args):
             model_mat = model_trans_mat * model_rot_mat * model_scale_mat
             mv_mat = view_mat * model_mat
             mvp_mat = proj_mat * mv_mat
-            light_pos_camera_space = glm.vec3(view_mat * glm.vec4(light_pos, 1.0))
+            light_pos_camera_space = glm.vec3(view_mat * light_rot_mat * glm.vec4(light_pos, 1.0))
 
             # First render pass: Render to FBO
             with recorder.record():
@@ -220,11 +220,27 @@ def main(**args):
             # Second render pass: Render FBO texture to default framebuffer
             quad_obj.draw(recorder.texture_id, window_width, window_height)
 
-            # Animate
-            delta_angle = rot_speed * (cur_time - prev_time)
-            quad = glm.angleAxis(glm.radians(delta_angle), rot_axis_in_world_space)
-            delta_rot_mat = glm.mat4_cast(quad)
-            model_rot_mat = delta_rot_mat * model_rot_mat
+            # Animate cube
+            angle_x = math.sin((cur_time - start_time) * 0.6) * rot_speed
+            angle_y = math.sin((cur_time - start_time) * 0.9) * rot_speed
+            angle_z = math.sin((cur_time - start_time) * 1.1) * rot_speed
+
+            rot_quaternion_x = glm.angleAxis(glm.radians(angle_x), glm.vec3(1.0, 0.0, 0.0))
+            rot_quaternion_y = glm.angleAxis(glm.radians(angle_y), glm.vec3(0.0, 1.0, 0.0))
+            rot_quaternion_z = glm.angleAxis(glm.radians(angle_z), glm.vec3(0.0, 0.0, 1.0))
+            rot_quaternion = rot_quaternion_x * rot_quaternion_y * rot_quaternion_z
+            model_rot_mat = glm.mat4_cast(rot_quaternion)
+
+            # Also rotate light at different speed
+            angle_x = math.sin((cur_time - start_time) * 1.5) * rot_speed
+            angle_y = math.sin((cur_time - start_time) * 1.8) * rot_speed
+            angle_z = math.sin((cur_time - start_time) * 2.1) * rot_speed
+
+            rot_quaternion_x = glm.angleAxis(glm.radians(angle_x), glm.vec3(1.0, 0.0, 0.0))
+            rot_quaternion_y = glm.angleAxis(glm.radians(angle_y), glm.vec3(0.0, 1.0, 0.0))
+            rot_quaternion_z = glm.angleAxis(glm.radians(angle_z), glm.vec3(0.0, 0.0, 1.0))
+            rot_quaternion = rot_quaternion_x * rot_quaternion_y * rot_quaternion_z
+            light_rot_mat = glm.mat4_cast(rot_quaternion)
 
             # Swap buffers
             glfw.swap_buffers(window)

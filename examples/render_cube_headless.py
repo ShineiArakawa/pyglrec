@@ -245,6 +245,7 @@ def main(**args):
 
     proj_mat = perspective(window_width / window_height)
 
+    light_rot_mat = glm.mat4(1.0)
     light_pos = glm.vec3(10.0, 10.0, 10.0)
 
     # --------------------------------------------------------------------------------------------
@@ -269,16 +270,12 @@ def main(**args):
     # --------------------------------------------------------------------------------------------
     # Main loop
 
-    rot_axis_in_world_space = glm.normalize(camera_up)
-    rot_quaternion = glm.angleAxis(glm.radians(args.rot_speed), rot_axis_in_world_space)
-    delta_rot_mat = glm.mat4_cast(rot_quaternion)
-
-    for _ in tqdm.trange(args.n_frames, desc='Rendering frames ... ', unit='frame'):
+    for frame_idx in tqdm.trange(args.n_frames, desc='Rendering frames ... ', unit='frame'):
         # Compute transformation matrices
         model_mat = model_trans_mat * model_rot_mat * model_scale_mat
         mv_mat = view_mat * model_mat
         mvp_mat = proj_mat * mv_mat
-        light_pos_camera_space = glm.vec3(view_mat * glm.vec4(light_pos, 1.0))
+        light_pos_camera_space = glm.vec3(view_mat * light_rot_mat * glm.vec4(light_pos, 1.0))
 
         # Render and record frame
         with recorder.record():
@@ -290,8 +287,27 @@ def main(**args):
             # Draw cube
             cube_obj.draw(mvp_mat, mv_mat, glm.transpose(glm.inverse(glm.mat3(mv_mat))), light_pos_camera_space)
 
-        # Animate
-        model_rot_mat = delta_rot_mat * model_rot_mat
+        # Animate cube
+        angle_x = math.sin(frame_idx * 0.6) * args.rot_speed
+        angle_y = math.sin(frame_idx * 0.9) * args.rot_speed
+        angle_z = math.sin(frame_idx * 1.1) * args.rot_speed
+
+        rot_quaternion_x = glm.angleAxis(glm.radians(angle_x), glm.vec3(1.0, 0.0, 0.0))
+        rot_quaternion_y = glm.angleAxis(glm.radians(angle_y), glm.vec3(0.0, 1.0, 0.0))
+        rot_quaternion_z = glm.angleAxis(glm.radians(angle_z), glm.vec3(0.0, 0.0, 1.0))
+        rot_quaternion = rot_quaternion_x * rot_quaternion_y * rot_quaternion_z
+        model_rot_mat = glm.mat4_cast(rot_quaternion)
+
+        # Also rotate light at different speed
+        angle_x = math.sin(frame_idx * 1.5) * args.rot_speed
+        angle_y = math.sin(frame_idx * 1.8) * args.rot_speed
+        angle_z = math.sin(frame_idx * 2.1) * args.rot_speed
+
+        rot_quaternion_x = glm.angleAxis(glm.radians(angle_x), glm.vec3(1.0, 0.0, 0.0))
+        rot_quaternion_y = glm.angleAxis(glm.radians(angle_y), glm.vec3(0.0, 1.0, 0.0))
+        rot_quaternion_z = glm.angleAxis(glm.radians(angle_z), glm.vec3(0.0, 0.0, 1.0))
+        rot_quaternion = rot_quaternion_x * rot_quaternion_y * rot_quaternion_z
+        light_rot_mat = glm.mat4_cast(rot_quaternion)
 
     out_file = os.path.join(args.out_dir, 'output_headless_nvenc.mp4' if args.nvenc else 'output_headless.mp4')
     recorder.finalize(out_file)

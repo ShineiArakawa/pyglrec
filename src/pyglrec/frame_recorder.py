@@ -268,6 +268,11 @@ class NVENCFrameRecorder:
             raise RuntimeError("CUDA-OpenGL interop plugin is not available. Check if 'nvcc' is installed and configured correctly.")
 
         self._frame_buffer = frame_buffer.FrameBuffer(width, height)
+        
+        # Get and set CUDA device for the current OpenGL context
+        cuda_device_id = int(self._plugin.get_cuda_device_for_current_OpenGL_context())
+        self._plugin.set_cuda_device_for_current_OpenGL_context(cuda_device_id)
+        print(f"Using CUDA device ID {cuda_device_id} for NVENC encoding.")
 
         # Initialize NVENC encoder
         encoder_opts = util.EasyDict()
@@ -275,6 +280,7 @@ class NVENCFrameRecorder:
             encoder_opts.preset = preset  # Preset ('P1' to 'P7')
 
         self._encoder: nvcodec.PyNvEncoder = nvcodec.CreateEncoder(
+            gpu_id=cuda_device_id,
             width=width,
             height=height,
             fmt='NV12',                                 # NVENC prefers NV12 format

@@ -2,9 +2,6 @@
  * @file cuda_gl_interop.cpp
  * @author Shinei Arakawa (sarakawalab@gmail.com)
  * @brief CUDA-OpenGL inter-operability functions
- *
- * @copyright This file includes modified codes from:
- *   Erik Härkönen's 'PyViewer' library (licensed under CC BY-NC-SA 4.0, https://creativecommons.org/licenses/by-nc-sa/4.0/): https://github.com/harskish/pyviewer.git
  */
 
 #include <cuda_runtime.h>
@@ -24,8 +21,48 @@
 #include <iostream>
 #include <rgba_to_nv12.cuh>
 #include <sstream>
+#include <string>
 #include <tuple>
 #include <utils.hpp>
+
+// --------------------------------------------------------------------------------------------------------------------------------
+// OpenGL API Call
+
+void set_cuda_device_for_current_OpenGL_context(int device_id) {
+  cudaErrors(cudaSetDevice(device_id));
+}
+
+int get_cuda_device_for_current_OpenGL_context() {
+  unsigned int device_count;
+  int devices[16] = {};  // Assume a maximum of 16 devices
+
+  cudaErrors(cudaGLGetDevices(&device_count,
+                              &devices[0],
+                              16,
+                              cudaGLDeviceListAll));
+
+  if (device_count == 0) {
+    throw std::runtime_error("cudaGLGetDevices returned no devices for the current OpenGL context.");
+  }
+
+  int selected_device = devices[0];
+
+  const GLubyte* renderer_ptr = glGetString(GL_RENDERER);
+  std::string renderer = renderer_ptr ? reinterpret_cast<const char*>(renderer_ptr) : "";
+
+  if (!renderer.empty()) {
+    for (unsigned int i = 0; i < device_count; ++i) {
+      cudaDeviceProp prop{};
+      cudaErrors(cudaGetDeviceProperties(&prop, devices[i]));
+      if (renderer.find(prop.name) != std::string::npos) {
+        selected_device = devices[i];
+        break;
+      }
+    }
+  }
+
+  return selected_device;
+}
 
 // --------------------------------------------------------------------------------------------------------------------------------
 // Device memory management
@@ -158,4 +195,11 @@ PYBIND11_MODULE(cuda_gl_interop, m) {
         pybind11::arg("cuda_tex_ptr"),
         pybind11::arg("cuda_tex_pitch"),
         pybind11::arg("d_ptr"));
+  m.def("get_cuda_device_for_current_OpenGL_context",
+        &get_cuda_device_for_current_OpenGL_context,
+        "Get CUDA device ID for the current OpenGL context");
+  m.def("set_cuda_device_for_current_OpenGL_context",
+        &set_cuda_device_for_current_OpenGL_context,
+        "Set CUDA device for the current OpenGL context",
+        pybind11::arg("device_id"));
 }

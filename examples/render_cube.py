@@ -12,6 +12,7 @@ import time
 
 import click
 import cube_object
+import gl_utils
 import glfw
 import OpenGL.GL as gl
 import OpenGL.platform as gl_platform

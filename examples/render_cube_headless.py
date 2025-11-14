@@ -213,8 +213,8 @@ def create_egl_context(width: int, height: int):
 @click.option("--height", default=1440, help="Window height")
 @click.option("--n_frames", default=500, help="Number of frames to render")
 @click.option("--out_dir", default="./outputs/render_cube_headless", help="Output directory to save the recorded video")
-@click.option("--fps", default=30.0, help="Frame rate limit")
-@click.option("--rot_speed", default=10.0, help="Cube rotation speed in degrees per frame")
+@click.option("--fps", default=120.0, help="Frame rate limit")
+@click.option("--rot_speed", default=5.0, help="Cube rotation speed in degrees per frame")
 @click.option("--nvenc", is_flag=True, help="Enable NVENC frame recording (requires NVIDIA GPU)")
 @click.option("--bitrate", default='10M', type=str, help="Bitrate for NVENC recorder (in bits per second)")
 def main(**args):
@@ -295,6 +295,7 @@ def main(**args):
 
     out_file = os.path.join(args.out_dir, 'output_headless_nvenc.mp4' if args.nvenc else 'output_headless.mp4')
     recorder.finalize(out_file)
+    print(f'Recorded video saved to: {out_file}')
 
     # ----------------------------------------------------------------------------------------------------------------------------------
     # Cleanup OpenGL resources and EGL context

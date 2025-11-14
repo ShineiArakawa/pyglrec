@@ -14,9 +14,16 @@ import click
 import cube_object
 import glfw
 import OpenGL.GL as gl
+import OpenGL.platform as gl_platform
 import pyglm.glm as glm
 
 import pyglrec
+
+print("\n[PyOpenGL Platform Info]")
+print("    PyOpenGL platform :", gl_platform.PLATFORM)
+print("    Platform class    :", gl_platform.PLATFORM.__class__.__name__)
+print("")
+
 
 # --------------------------------------------------------------------------------------------
 # OpenGL version and GLSL version settings
@@ -119,9 +126,14 @@ def main(**args):
 
     glfw.make_context_current(window)
 
-    # Print OpenGL and GLFW versions
-    print(f'OpenGL version : {gl.glGetString(gl.GL_VERSION).decode()}')
-    print(f'GLFW version   : {glfw.get_version_string().decode()}')
+    # Print version info
+    print(f"[OpenGL/GLFW Version Info]")
+    print(f'    OpenGL version  : {gl.glGetString(gl.GL_VERSION).decode()}')
+    print(f"    OpenGL vendor   : {gl.glGetString(gl.GL_VENDOR).decode()}")
+    print(f"    OpenGL renderer : {gl.glGetString(gl.GL_RENDERER).decode()}")
+    print(f"    GLSL version    : {gl.glGetString(gl.GL_SHADING_LANGUAGE_VERSION).decode()}")
+    print(f'    GLFW version    : {glfw.get_version_string().decode()}')
+    print(f'')
 
     # --------------------------------------------------------------------------------------------
     # Camera setup
@@ -221,6 +233,10 @@ def main(**args):
 
     out_file = os.path.join(args.out_dir, 'output_nvenc.mp4' if args.nvenc else 'output.mp4')
     recorder.finalize(out_file)
+    print(f'Recorded video saved to: {out_file}')
+
+    # --------------------------------------------------------------------------------------------
+    # Cleanup OpenGL resources and GLFW window
 
     cube_obj.dispose()
     quad_obj.dispose()

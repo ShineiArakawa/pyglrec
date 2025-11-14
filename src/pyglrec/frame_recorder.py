@@ -292,10 +292,10 @@ class NVENCFrameRecorder:
             # Optional parameters (See "https://docs.nvidia.com/video-technologies/pynvvideocodec/pdf/PyNvVideoCodec_API_ProgGuide.pdf" for details)
             bitrate=avg_bitrate,                        # Bitrate
             fps=fps,                                    # Frames per second
-            tuning_info='lossless',                     # Tuning info ('high_quality', 'low_latency', 'ultra_low_latency', 'lossless')
+            tuning_info='high_quality',                 # Tuning info ('high_quality', 'low_latency', 'ultra_low_latency', 'lossless')
             maxbitrate=max_bitrate,                     # Maximum bitrate
-            vbvinit=avg_bitrate,                        # Initial VBV buffer size
-            vbvbufsize=avg_bitrate,                     # VBV buffer size
+            vbvinit=max_bitrate,                        # Initial VBV buffer size
+            vbvbufsize=max_bitrate,                     # VBV buffer size
             rc=rate_control_mode,                       # Rate control mode ('cbr', 'constqp', 'vbr')
             **encoder_opts
         )

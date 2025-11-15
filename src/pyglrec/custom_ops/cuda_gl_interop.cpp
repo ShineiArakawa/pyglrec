@@ -19,7 +19,7 @@
 #include <pybind11/pybind11.h>
 
 #include <iostream>
-#include <rgba_to_nv12.cuh>
+#include <rgba_conversion.cuh>
 #include <sstream>
 #include <string>
 #include <tuple>
@@ -100,13 +100,11 @@ std::tuple<uint64_t, uint64_t> allocate_device_memory_2d(int width, int height, 
 // --------------------------------------------------------------------------------------------------------------------------------
 // Texture copy with YUV conversion
 
-void copy_texture_to_cuda_memory_with_YUV_conversion(
-    uint64_t texture_id,
-    int width,
-    int height,
-    uint64_t cuda_tex_ptr,
-    uint64_t cuda_tex_pitch,
-    uint64_t d_ptr) {
+void copy_texture_to_cuda_memory(uint64_t texture_id,
+                                 int width,
+                                 int height,
+                                 uint64_t cuda_tex_ptr,
+                                 uint64_t cuda_tex_pitch) {
   // Register the texture with CUDA
   cudaGraphicsResource* cuda_resource = nullptr;
   cudaErrors(cudaGraphicsGLRegisterImage(&cuda_resource,
@@ -134,6 +132,19 @@ void copy_texture_to_cuda_memory_with_YUV_conversion(
                                    height,
                                    cudaMemcpyDeviceToDevice));
 
+  // Unmap the resource
+  cudaErrors(cudaGraphicsUnmapResources(1, &cuda_resource, 0));
+  cudaErrors(cudaGraphicsUnregisterResource(cuda_resource));
+
+  // Synchronize device
+  cudaErrors(cudaDeviceSynchronize());
+}
+
+void convert_rgba_to_nv12(int width,
+                          int height,
+                          uint64_t cuda_tex_ptr,
+                          uint64_t cuda_tex_pitch,
+                          uint64_t d_ptr) {
   // Copy and convert RGBA to NV12
   rgba_to_nv12(cuda_tex_ptr,
                cuda_tex_pitch,
@@ -141,9 +152,21 @@ void copy_texture_to_cuda_memory_with_YUV_conversion(
                height,
                d_ptr);
 
-  // Unmap the resource
-  cudaErrors(cudaGraphicsUnmapResources(1, &cuda_resource, 0));
-  cudaErrors(cudaGraphicsUnregisterResource(cuda_resource));
+  // Synchronize device
+  cudaErrors(cudaDeviceSynchronize());
+}
+
+void convert_rgba_to_yuv444(int width,
+                            int height,
+                            uint64_t cuda_tex_ptr,
+                            uint64_t cuda_tex_pitch,
+                            uint64_t d_ptr) {
+  // Copy and convert RGBA to YUV444
+  rgba_to_yuv444(cuda_tex_ptr,
+                 cuda_tex_pitch,
+                 width,
+                 height,
+                 d_ptr);
 
   // Synchronize device
   cudaErrors(cudaDeviceSynchronize());
@@ -186,10 +209,25 @@ PYBIND11_MODULE(cuda_gl_interop, m) {
         &free_device_memory,
         "Free device memory",
         pybind11::arg("ptr"));
-  m.def("copy_texture_to_cuda_memory_with_YUV_conversion",
-        &copy_texture_to_cuda_memory_with_YUV_conversion,
-        "Copy OpenGL texture to CUDA device memory with YUV conversion",
+  m.def("copy_texture_to_cuda_memory",
+        &copy_texture_to_cuda_memory,
+        "Copy OpenGL texture to CUDA device linear memory",
         pybind11::arg("texture_id"),
+        pybind11::arg("width"),
+        pybind11::arg("height"),
+        pybind11::arg("cuda_tex_ptr"),
+        pybind11::arg("cuda_tex_pitch"));
+  m.def("convert_rgba_to_nv12",
+        &convert_rgba_to_nv12,
+        "Convert RGBA texture in CUDA linear memory to NV12 format in CUDA memory",
+        pybind11::arg("width"),
+        pybind11::arg("height"),
+        pybind11::arg("cuda_tex_ptr"),
+        pybind11::arg("cuda_tex_pitch"),
+        pybind11::arg("d_ptr"));
+  m.def("convert_rgba_to_yuv444",
+        &convert_rgba_to_yuv444,
+        "Convert RGBA texture in CUDA linear memory to YUV444 format in CUDA memory",
         pybind11::arg("width"),
         pybind11::arg("height"),
         pybind11::arg("cuda_tex_ptr"),

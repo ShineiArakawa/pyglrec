@@ -22,9 +22,9 @@
 __forceinline__ __device__ void rgb_to_yuv_601_full(float r, float g, float b,
                                                     float& y, float& u, float& v) {
   // clang-format off
-  y =     0.299f * r    + 0.587f * g    + 0.114f * b;         // in [0.0, 1.0]
-  u = -0.168736f * r - 0.331264f * g      + 0.5f * b + 0.5f;  // in [0.0, 1.0]
-  v =       0.5f * r - 0.418688f * g - 0.081312f * b + 0.5f;  // in [0.0, 1.0]
+  y =   0.299f    * r + 0.587f    * g + 0.114f    * b;         // in [0.0, 1.0]
+  u = - 0.168736f * r - 0.331264f * g + 0.5f      * b + 0.5f;  // in [0.0, 1.0]
+  v =   0.5f      * r - 0.418688f * g - 0.081312f * b + 0.5f;  // in [0.0, 1.0]
   // clang-format on
 }
 
@@ -37,7 +37,8 @@ __forceinline__ __device__ void rgb_to_yuv_601_full(float r, float g, float b,
  * @param r Red component in [0.0, 1.0]
  * @param g Green component in [0.0, 1.0]
  * @param b Blue component in [0.0, 1.0]
- * @return __forceinline__
+ *
+ * @note See also: https://ja.wikipedia.org/wiki/YUV
  */
 __forceinline__ __device__ void yuv_to_rgb_601_full(float y, float u, float v,
                                                     float& r, float& g, float& b) {
@@ -166,7 +167,7 @@ __global__ void rgba_to_nv12_kernel(
 __global__ void nv12_to_rgba_kernel(const std::uint8_t* __restrict__ src_nv12,
                                     int width,
                                     int height,
-                                    std::uint8_t* __restrict__ dst_rgba,
+                                    uchar4* __restrict__ dst_rgba,
                                     size_t dst_pitch  // bytes per row
 ) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;  // pixel x at the output RGBA image
@@ -201,11 +202,20 @@ __global__ void nv12_to_rgba_kernel(const std::uint8_t* __restrict__ src_nv12,
   std::uint8_t B8 = clamp8(B);
 
   // Write to RGBA output (flipped vertically)
-  std::uint8_t* row_base = dst_rgba + (height - 1 - y) * dst_pitch;
+  std::uint8_t* row_base = reinterpret_cast<std::uint8_t*>(dst_rgba) + (height - 1 - y) * dst_pitch;
   uchar4* row = reinterpret_cast<uchar4*>(row_base);
   row[x] = make_uchar4(R8, G8, B8, 255);
 }
 
+/**
+ * @brief Convert RGBA image to YUV444 format. This kernel also flips the image vertically during the conversion.
+ *
+ * @param src_rgba
+ * @param src_pitch
+ * @param width
+ * @param height
+ * @param dst_yuv
+ */
 __global__ void rgba_to_yuv444_kernel(const uchar4* __restrict__ src_rgba,
                                       size_t src_pitch,  // bytes per row
                                       int width,
@@ -236,6 +246,15 @@ __global__ void rgba_to_yuv444_kernel(const uchar4* __restrict__ src_rgba,
   dst_yuv[idx + 2 * pitch] = clamp8(Vf);  // V
 }
 
+/**
+ * @brief Convert YUV444 image to RGBA format. This kernel also flips the image vertically during the conversion.
+ *
+ * @param src_yuv
+ * @param width
+ * @param height
+ * @param dst_rgba
+ * @param dst_pitch
+ */
 __global__ void yuv444_to_rgba_kernel(std::uint8_t* __restrict__ src_yuv,
                                       int width,
                                       int height,
@@ -304,7 +323,7 @@ void nv12_to_rgba(uint64_t src_nv12_ptr,  // Linear NV12 cuda memory pointer
                   uint64_t dst_pitch      // Linear RGBA cuda memory pitch (from cudaMallocPitch)
 ) {
   const std::uint8_t* src_nv12 = reinterpret_cast<const std::uint8_t*>(src_nv12_ptr);
-  std::uint8_t* dst_rgba = reinterpret_cast<std::uint8_t*>(dst_rgba_ptr);
+  uchar4* dst_rgba = reinterpret_cast<uchar4*>(dst_rgba_ptr);
   size_t pitch = static_cast<size_t>(dst_pitch);
 
   dim3 threads_per_block(32, 16);

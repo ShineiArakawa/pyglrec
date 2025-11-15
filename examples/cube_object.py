@@ -18,6 +18,8 @@ else:
 
 
 class CubeObject:
+    """Just a simple colored cube object for rendering in OpenGL."""
+
     def __init__(self):
         """Initialize the cube object by setting up shaders and geometry. This function must be called within a valid OpenGL context."""
 

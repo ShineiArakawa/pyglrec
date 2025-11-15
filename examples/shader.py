@@ -13,6 +13,8 @@ import pyglrec
 
 
 class ObjectShader:
+    """A shader program for rendering 3D objects with various rendering modes including shading."""
+
     VERTEX_SHADER = """
     # version 330 core
     
@@ -126,7 +128,9 @@ class ObjectShader:
         U_COLOR,
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize the shader program. This function must be called within a valid OpenGL context."""
+
         self._program = pyglrec.build_shader_program(self.VERTEX_SHADER, self.FRAGMENT_SHADER)
 
         # Get uniform locations
@@ -188,7 +192,7 @@ class ObjectShader:
         finally:
             gl.glUseProgram(0)
 
-    def dispose(self):
+    def dispose(self) -> None:
         """Gracefully delete the shader program."""
 
         gl.glDeleteProgram(self._program)

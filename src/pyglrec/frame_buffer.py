@@ -107,7 +107,7 @@ class FrameBuffer:
         """The current height of the framebuffer."""
         return self._height
 
-    def bind(self):
+    def bind(self) -> None:
         """Bind the framebuffer.
         """
 
@@ -115,7 +115,7 @@ class FrameBuffer:
 
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._fbo)
 
-    def unbind(self, resolve: bool = True):
+    def unbind(self, resolve: bool = True) -> None:
         """Unbind the framebuffer and switch back to the previous framebuffer.
 
         Parameters
@@ -201,7 +201,7 @@ class FrameBuffer:
             gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
             gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, self._prev_fbo)
 
-    def rescale(self, width: int, height: int):
+    def rescale(self, width: int, height: int) -> None:
         """Rescale the framebuffer to a new width and height.
 
         Parameters
@@ -258,7 +258,7 @@ class FrameBuffer:
 
         gl.glBindFramebuffer(gl.GL_FRAMEBUFFER, cur_fbo)
 
-    def dispose(self):
+    def dispose(self) -> None:
         """Gracefully delete the framebuffer and its attachments.
         """
 

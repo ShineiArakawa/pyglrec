@@ -28,10 +28,20 @@
 // --------------------------------------------------------------------------------------------------------------------------------
 // OpenGL API Call
 
+/**
+ * @brief Set the cuda device for current OpenGL context object
+ *
+ * @param device_id
+ */
 void set_cuda_device_for_current_OpenGL_context(int device_id) {
   cudaErrors(cudaSetDevice(device_id));
 }
 
+/**
+ * @brief Get the cuda device ID for current OpenGL context object
+ *
+ * @return int CUDA device ID
+ */
 int get_cuda_device_for_current_OpenGL_context() {
   unsigned int device_count;
   int devices[16] = {};  // Assume a maximum of 16 devices
@@ -69,6 +79,12 @@ int get_cuda_device_for_current_OpenGL_context() {
 
 // Linear 1D device memory allocation and deallocation
 
+/**
+ * @brief Allocate 1D device memory
+ *
+ * @param size_in_bytes Size in bytes
+ * @return uint64_t Pointer to allocated device memory (as uint64_t)
+ */
 uint64_t allocate_device_memory_1d(size_t size_in_bytes) {
   void* ptr = nullptr;
   cudaErrors(cudaMalloc(&ptr, size_in_bytes));
@@ -76,16 +92,16 @@ uint64_t allocate_device_memory_1d(size_t size_in_bytes) {
   return reinterpret_cast<uint64_t>(ptr);
 }
 
-void free_device_memory(uint64_t d_ptr) {
-  if (d_ptr == 0) {
-    return;
-  }
-  cudaErrors(cudaFree(reinterpret_cast<void*>(d_ptr)));
-  cudaErrors(cudaDeviceSynchronize());
-}
-
 // Linear 2D device memory allocation
 
+/**
+ * @brief Allocate 2D device memory
+ *
+ * @param width Width in elements
+ * @param height Height in elements
+ * @param element_size Size of each element in bytes
+ * @return std::tuple<uint64_t, uint64_t> Tuple of (pointer to allocated device memory as uint64_t, pitch in bytes)
+ */
 std::tuple<uint64_t, uint64_t> allocate_device_memory_2d(int width, int height, uint64_t element_size) {
   void* d_ptr = nullptr;
   size_t pitch = 0;
@@ -97,9 +113,31 @@ std::tuple<uint64_t, uint64_t> allocate_device_memory_2d(int width, int height, 
   return std::make_tuple(reinterpret_cast<uint64_t>(d_ptr), static_cast<uint64_t>(pitch));
 }
 
+/**
+ * @brief Free device memory
+ *
+ * @param d_ptr Pointer to device memory (as uint64_t)
+ */
+void free_device_memory(uint64_t d_ptr) {
+  if (d_ptr == 0) {
+    return;
+  }
+  cudaErrors(cudaFree(reinterpret_cast<void*>(d_ptr)));
+  cudaErrors(cudaDeviceSynchronize());
+}
+
 // --------------------------------------------------------------------------------------------------------------------------------
 // Texture copy with YUV conversion
 
+/**
+ * @brief Copy an OpenGL texture to CUDA device memory
+ *
+ * @param texture_id OpenGL texture ID
+ * @param width Width of the texture
+ * @param height Height of the texture
+ * @param cuda_tex_ptr Pointer to CUDA device memory
+ * @param cuda_tex_pitch Pitch of the CUDA device memory
+ */
 void copy_texture_to_cuda_memory(uint64_t texture_id,
                                  int width,
                                  int height,
@@ -140,6 +178,15 @@ void copy_texture_to_cuda_memory(uint64_t texture_id,
   cudaErrors(cudaDeviceSynchronize());
 }
 
+/**
+ * @brief Convert RGBA texture to NV12 format, which involves chroma subsampling with 4:2:0
+ *
+ * @param width Width of the texture
+ * @param height Height of the texture
+ * @param cuda_tex_ptr Pointer to CUDA device memory containing the RGBA texture
+ * @param cuda_tex_pitch Pitch of the CUDA device memory containing the RGBA texture
+ * @param d_ptr Pointer to CUDA device memory for the NV12 output
+ */
 void convert_rgba_to_nv12(int width,
                           int height,
                           uint64_t cuda_tex_ptr,
@@ -156,6 +203,40 @@ void convert_rgba_to_nv12(int width,
   cudaErrors(cudaDeviceSynchronize());
 }
 
+/**
+ * @brief Convert NV12 format to RGBA texture
+ *
+ * @param width Width of the texture
+ * @param height Height of the texture
+ * @param cuda_nv12_ptr Pointer to CUDA device memory containing the NV12 texture
+ * @param d_ptr Pointer to CUDA device memory for the RGBA output
+ * @param d_pitch Pitch of the CUDA device memory for the RGBA output
+ */
+void convert_nv12_to_rgba(int width,
+                          int height,
+                          uint64_t cuda_nv12_ptr,
+                          uint64_t d_ptr,
+                          uint64_t d_pitch) {
+  // Copy and convert NV12 to RGBA
+  nv12_to_rgba(cuda_nv12_ptr,
+               width,
+               height,
+               d_ptr,
+               d_pitch);
+
+  // Synchronize device
+  cudaErrors(cudaDeviceSynchronize());
+}
+
+/**
+ * @brief Convert RGBA texture to YUV444 format, which is a lossless format without chroma subsampling
+ *
+ * @param width Width of the texture
+ * @param height Height of the texture
+ * @param cuda_tex_ptr Pointer to CUDA device memory containing the RGBA texture
+ * @param cuda_tex_pitch Pitch of the CUDA device memory containing the RGBA texture
+ * @param d_ptr Pointer to CUDA device memory for the YUV444 output
+ */
 void convert_rgba_to_yuv444(int width,
                             int height,
                             uint64_t cuda_tex_ptr,
@@ -167,6 +248,31 @@ void convert_rgba_to_yuv444(int width,
                  width,
                  height,
                  d_ptr);
+
+  // Synchronize device
+  cudaErrors(cudaDeviceSynchronize());
+}
+
+/**
+ * @brief Convert YUV444 format to RGBA texture
+ *
+ * @param width Width of the texture
+ * @param height Height of the texture
+ * @param cuda_yuv444_ptr Pointer to CUDA device memory containing the YUV444 texture
+ * @param d_ptr Pointer to CUDA device memory for the RGBA output
+ * @param d_pitch Pitch of the CUDA device memory for the RGBA output
+ */
+void convert_yuv444_to_rgba(int width,
+                            int height,
+                            uint64_t cuda_yuv444_ptr,
+                            uint64_t d_ptr,
+                            uint64_t d_pitch) {
+  // Copy and convert YUV444 to RGBA
+  yuv444_to_rgba(cuda_yuv444_ptr,
+                 width,
+                 height,
+                 d_ptr,
+                 d_pitch);
 
   // Synchronize device
   cudaErrors(cudaDeviceSynchronize());
@@ -225,6 +331,14 @@ PYBIND11_MODULE(cuda_gl_interop, m) {
         pybind11::arg("cuda_tex_ptr"),
         pybind11::arg("cuda_tex_pitch"),
         pybind11::arg("d_ptr"));
+  m.def("convert_nv12_to_rgba",
+        &convert_nv12_to_rgba,
+        "Convert NV12 format in CUDA memory to RGBA texture in CUDA linear memory",
+        pybind11::arg("width"),
+        pybind11::arg("height"),
+        pybind11::arg("cuda_nv12_ptr"),
+        pybind11::arg("d_ptr"),
+        pybind11::arg("d_pitch"));
   m.def("convert_rgba_to_yuv444",
         &convert_rgba_to_yuv444,
         "Convert RGBA texture in CUDA linear memory to YUV444 format in CUDA memory",
@@ -233,6 +347,14 @@ PYBIND11_MODULE(cuda_gl_interop, m) {
         pybind11::arg("cuda_tex_ptr"),
         pybind11::arg("cuda_tex_pitch"),
         pybind11::arg("d_ptr"));
+  m.def("convert_yuv444_to_rgba",
+        &convert_yuv444_to_rgba,
+        "Convert YUV444 format in CUDA memory to RGBA texture in CUDA linear memory",
+        pybind11::arg("width"),
+        pybind11::arg("height"),
+        pybind11::arg("cuda_yuv444_ptr"),
+        pybind11::arg("d_ptr"),
+        pybind11::arg("d_pitch"));
   m.def("get_cuda_device_for_current_OpenGL_context",
         &get_cuda_device_for_current_OpenGL_context,
         "Get CUDA device ID for the current OpenGL context");

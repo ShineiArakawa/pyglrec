@@ -2,18 +2,9 @@
 CUDA-OpenGL inter-operability
 =============================
 
-This module provides a way to upload images directly from CUDA tensors to OpenGL VBOs using a custom PyTorch extension.
-
-LICENSE
--------
-
-This file includes modified codes from:
-
-- Erik Härkönen's 'PyViewer' library (licensed under CC BY-NC-SA 4.0, https://creativecommons.org/licenses/by-nc-sa/4.0/): https://github.com/harskish/pyviewer.git
+This module provides a way to build and load a C++/CUDA plugin for CUDA-OpenGL inter-operability and CUDA memory management.
 """
 
-
-# Code graciously provided by Pauli Kemppinen (github.com/msqrt)
 
 import functools
 import glob
@@ -503,6 +494,8 @@ class CUDAMemory1D:
     """Class for managing 1D CUDA device memory."""
 
     def __init__(self):
+        """Initialize the CUDAMemory1D instance."""
+
         self._plugin = get_cuda_plugin()
         if self._plugin is None:
             raise RuntimeError("CUDA-OpenGL interop plugin is not available")
@@ -510,7 +503,20 @@ class CUDAMemory1D:
         self._ptr = 0
         self._num_bytes = 0
 
-    def allocate(self, num_bytes: int):
+    def allocate(self, num_bytes: int) -> None:
+        """Allocate 1D CUDA device memory.
+
+        Parameters
+        ----------
+        num_bytes : int
+            The number of bytes to allocate.
+
+        Raises
+        ------
+        RuntimeError
+            If the CUDA plugin returns an unexpected pointer type.
+        """
+
         if self._ptr != 0:
             self.free()
 
@@ -521,18 +527,24 @@ class CUDAMemory1D:
         self._ptr = ptr
         self._num_bytes = num_bytes
 
-    def free(self):
+    def free(self) -> None:
+        """Free the allocated CUDA device memory."""
+
         if self._ptr != 0:
             self._plugin.free_device_memory(self._ptr)
             self._ptr = 0
             self._num_bytes = 0
 
     @property
-    def ptr(self):
+    def ptr(self) -> int:
+        """Pointer to the allocated CUDA device memory."""
+
         return self._ptr
 
     @property
-    def num_bytes(self):
+    def num_bytes(self) -> int:
+        """Number of bytes allocated in the CUDA device memory."""
+
         return self._num_bytes
 
 
@@ -540,6 +552,8 @@ class CUDAMemory2D_URGB4:
     """Class for managing linear 2D CUDA device memory for URGB4 format."""
 
     def __init__(self):
+        """Initialize the CUDAMemory2D_URGB4 instance."""
+
         self._plugin = get_cuda_plugin()
         if self._plugin is None:
             raise RuntimeError("CUDA-OpenGL interop plugin is not available")
@@ -549,7 +563,22 @@ class CUDAMemory2D_URGB4:
         self._width = 0
         self._height = 0
 
-    def allocate(self, width: int, height: int):
+    def allocate(self, width: int, height: int) -> None:
+        """Allocate 2D CUDA device memory.
+
+        Parameters
+        ----------
+        width : int
+            The width of the 2D memory in pixels.
+        height : int
+            The height of the 2D memory in pixels.
+
+        Raises
+        ------
+        RuntimeError
+            If the CUDA plugin returns an unexpected pointer type.
+        """
+
         if self._ptr != 0:
             self.free()
 
@@ -562,7 +591,9 @@ class CUDAMemory2D_URGB4:
         self._width = width
         self._height = height
 
-    def free(self):
+    def free(self) -> None:
+        """Free the allocated CUDA device memory."""
+
         if self._ptr != 0:
             self._plugin.free_device_memory(self._ptr)
             self._ptr = 0
@@ -571,17 +602,25 @@ class CUDAMemory2D_URGB4:
             self._height = 0
 
     @property
-    def ptr(self):
+    def ptr(self) -> int:
+        """Pointer to the allocated CUDA device memory."""
+
         return self._ptr
 
     @property
-    def pitch(self):
+    def pitch(self) -> int:
+        """Pitch (in bytes) of the allocated 2D CUDA device memory."""
+
         return self._pitch
 
     @property
-    def width(self):
+    def width(self) -> int:
+        """Width (in pixels) of the allocated 2D CUDA device memory."""
+
         return self._width
 
     @property
-    def height(self):
+    def height(self) -> int:
+        """Height (in pixels) of the allocated 2D CUDA device memory."""
+
         return self._height

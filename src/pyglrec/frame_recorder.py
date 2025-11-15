@@ -278,7 +278,9 @@ class NVENCInputFrame:
         else:
             raise ValueError(f"Unsupported format: {fmt}")
 
-    def dispose(self):
+    def dispose(self) -> None:
+        """Gracefully dispose of CUDA memories."""
+
         if self._cuda_frame_mem:
             self._cuda_frame_mem.free()
             self._cuda_frame_mem = None
@@ -286,12 +288,25 @@ class NVENCInputFrame:
             self._cuda_tex_mem.free()
             self._cuda_tex_mem = None
 
-    def cuda(self):
+    def cuda(self) -> list[CUDAArrayInterface]:
         """This method is required by PyNvVideoCodec to get the CUDA Array Interface (CAI)."""
 
         return self.cai
 
-    def process_current_texture(self, texture_id: int):
+    def process_current_texture(self, texture_id: int) -> None:
+        """Retrieve and convert the current OpenGL texture into the NVENC input frame format.
+
+        Parameters
+        ----------
+        texture_id : int
+            OpenGL texture id
+
+        Raises
+        ------
+        ValueError
+            Unsupported pixel format
+        """
+
         # Copy framebuffer texture to CUDA memory
         self._plugin.copy_texture_to_cuda_memory(
             texture_id,
@@ -424,6 +439,8 @@ class NVENCFrameRecorder:
         self._annex_b_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.h264' if codec == 'h264' else '.hevc', delete=False)  # Keep the file for later processing
 
     def __del__(self):
+        """Dispose of resources upon deletion."""
+
         if self._annex_b_file is not None:
             self._annex_b_file.close()
             try:

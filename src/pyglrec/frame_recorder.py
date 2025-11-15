@@ -200,28 +200,126 @@ class UncompressedFrameCPURecorder:
 # GPU Frame Recorder enhanced by NVENC
 
 
-class AppCAI:
-    def __init__(self, shape, stride, typestr, gpualloc):
+class CUDAArrayInterface:
+    """CUDA Array Interface (CAI) for GPU memory representation."""
+
+    def __init__(self, shape: tuple[int, ...], strides: tuple[int, ...], typestr: str, gpu_alloc: int):
+        """Initialize the CUDA Array Interface.
+
+        Parameters
+        ----------
+        shape : tuple[int, ...]
+            The shape of the array.
+        strides : tuple[int, ...]
+            The strides of the array.
+        typestr : str
+            The data type string (e.g., '|u1' for uint8).
+        gpu_alloc : int
+            The GPU memory address.
+        """
+
         shape_int = tuple([int(x) for x in shape])
-        stride_int = tuple([int(x) for x in stride])
-        self.__cuda_array_interface__ = {"shape": shape_int, "strides": stride_int, "data": (int(gpualloc), False), "typestr": typestr, "version": 3}
+        stride_int = tuple([int(x) for x in strides])
+        self.__cuda_array_interface__ = {"shape": shape_int, "strides": stride_int, "data": (int(gpu_alloc), False), "typestr": typestr, "version": 3}
 
 
-class AppFrame:
-    def __init__(self, width: int, height: int, format: str, cuda_mem: cuda_gl_interop.CUDAMemory1D):
-        if format == "NV12":
-            nv12_frame_size = int(width * height * 3 / 2)
-            cuda_mem.allocate(nv12_frame_size)
+class NVENCInputFrame:
+    """Input frame for NVENC encoder."""
+
+    def __init__(self, width: int, height: int, fmt: typing.Literal['NV12', 'YUV444']):
+        """Initialize the NVENC input frame with CUDA memory.
+
+        Parameters
+        ----------
+        width : int
+            The width of the frame.
+        height : int
+            The height of the frame.
+        fmt : typing.Literal['NV12', 'YUV444']
+            The pixel format of the frame.
+        """
+
+        self._width = width
+        self._height = height
+        self._fmt = fmt
+
+        # Initialize CUDA-OpenGL interop plugin
+        self._plugin = cuda_gl_interop.get_cuda_plugin()
+        if self._plugin is None:
+            raise RuntimeError("CUDA-OpenGL interop plugin is not available. Check if 'nvcc' is installed and configured correctly.")
+
+        # Initialize CUDA memories
+        self._cuda_tex_mem = cuda_gl_interop.CUDAMemory2D_URGB4()   # For texture data
+        self._cuda_tex_mem.allocate(width, height)
+
+        self._cuda_frame_mem = cuda_gl_interop.CUDAMemory1D()  # For NVENC input frame data
+
+        if fmt == "NV12":
+            self.frame_size = int(width * height * 3 / 2)
+
+            # Allocate NV12 frame memory
+            self._cuda_frame_mem.allocate(self.frame_size)
+
+            # Initialize CUDA Array Interface (CAI)
             self.cai = []
-            self.cai.append(AppCAI((height, width, 1), (width, 1, 1), "|u1", int(cuda_mem.ptr)))
-            chroma_alloc = int(cuda_mem.ptr) + width * height
-            self.cai.append(AppCAI((int(height / 2), int(width / 2), 2), (width, 2, 1), "|u1", chroma_alloc))
-            self.frameSize = nv12_frame_size
+            self.cai.append(CUDAArrayInterface((height, width, 1), (width, 1, 1), "|u1", int(self._cuda_frame_mem.ptr)))
+            self.cai.append(CUDAArrayInterface((int(height / 2), int(width / 2), 2), (width, 2, 1), "|u1", int(self._cuda_frame_mem.ptr) + width * height))
+        elif fmt == "YUV444":
+            self.frame_size = int(width * height * 3)
+
+            # Allocate YUV444 frame memory
+            self._cuda_frame_mem.allocate(self.frame_size)
+
+            # Initialize CUDA Array Interface (CAI)
+            self.cai = []
+            self.cai.append(CUDAArrayInterface((height, width, 1), (width, 1, 1), "|u1", int(self._cuda_frame_mem.ptr)))
+            self.cai.append(CUDAArrayInterface((height, width, 1), (width, 1, 1), "|u1", int(self._cuda_frame_mem.ptr) + width * height))
+            self.cai.append(CUDAArrayInterface((height, width, 1), (width, 1, 1), "|u1", int(self._cuda_frame_mem.ptr) + width * height * 2))
         else:
-            raise ValueError(f"Unsupported format: {format}")
+            raise ValueError(f"Unsupported format: {fmt}")
+
+    def dispose(self):
+        if self._cuda_frame_mem:
+            self._cuda_frame_mem.free()
+            self._cuda_frame_mem = None
+        if self._cuda_tex_mem:
+            self._cuda_tex_mem.free()
+            self._cuda_tex_mem = None
 
     def cuda(self):
+        """This method is required by PyNvVideoCodec to get the CUDA Array Interface (CAI)."""
+
         return self.cai
+
+    def process_current_texture(self, texture_id: int):
+        # Copy framebuffer texture to CUDA memory
+        self._plugin.copy_texture_to_cuda_memory(
+            texture_id,
+            self._width,
+            self._height,
+            self._cuda_tex_mem.ptr,
+            self._cuda_tex_mem.pitch,
+        )
+
+        # Convert RGBA texture to YUV format with chroma subsampling
+        if self._fmt == "NV12":
+            self._plugin.convert_rgba_to_nv12(
+                self._width,
+                self._height,
+                self._cuda_tex_mem.ptr,
+                self._cuda_tex_mem.pitch,
+                self._cuda_frame_mem.ptr,
+            )
+        elif self._fmt == "YUV444":
+            self._plugin.convert_rgba_to_yuv444(
+                self._width,
+                self._height,
+                self._cuda_tex_mem.ptr,
+                self._cuda_tex_mem.pitch,
+                self._cuda_frame_mem.ptr,
+            )
+        else:
+            raise ValueError(f"Unsupported format: {self._fmt}")
 
 
 class NVENCFrameRecorder:
@@ -236,6 +334,7 @@ class NVENCFrameRecorder:
         preset: typing.Literal['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] | None = None,
         avg_bitrate: int | str = '20M',  # 20 Mbps
         max_bitrate: int | str = '30M',  # 30 Mbps
+        chroma_format: typing.Literal['NV12', 'YUV444'] = 'YUV444',
         rate_control_mode: typing.Literal['cbr', 'vbr', 'constqp'] = 'vbr',
     ):
         """Initialize the NVENC frame recorder to record OpenGL frames. The recorder uses CUDA-OpenGL interop to efficiently transfer frame data from OpenGL to CUDA for encoding without touching the system memory.
@@ -256,6 +355,8 @@ class NVENCFrameRecorder:
             The average bitrate for encoding in bits per second, by default 20_000_000 (20 Mbps).
         max_bitrate : int, optional
             The maximum bitrate for encoding in bits per second, by default 30_000_000 (30 Mbps).
+        chroma_format: typing.Literal['NV12', 'YUV444'] = 'YUV444',
+            The chroma subsampling format for encoding ('NV12' or 'YUV444'), by default 'YUV444'.
         rate_control_mode : typing.Literal['cbr', 'vbr', 'constqp'], optional
             The rate control mode ('cbr', 'vbr', or 'constqp'), by default 'vbr'.
 
@@ -302,7 +403,7 @@ class NVENCFrameRecorder:
             gpu_id=cuda_device_id,
             width=width,
             height=height,
-            fmt='NV12',                                 # NVENC prefers NV12 format
+            fmt=chroma_format,                          # NVENC prefers NV12 format
             usecpuinputbuffer=False,                    # Use GPU input buffer
             codec=codec,                                # Codec ('h264' or 'hevc')
             # Optional parameters (See "https://docs.nvidia.com/video-technologies/pynvvideocodec/pdf/PyNvVideoCodec_API_ProgGuide.pdf" for details)
@@ -316,19 +417,14 @@ class NVENCFrameRecorder:
             **encoder_opts
         )
 
-        # Initialize CUDA memories
-        self._cuda_nv12_frame_mem = cuda_gl_interop.CUDAMemory1D()  # For NV12 frame data
-        self._cuda_tex_mem = cuda_gl_interop.CUDAMemory2D_URGB4()   # For texture data
-        self._cuda_tex_mem.allocate(width, height)
-
         # Initialize AppFrame for NV12 format
-        self._nvenc_frame = AppFrame(width, height, "NV12", self._cuda_nv12_frame_mem)
+        self._nvenc_frame = NVENCInputFrame(width, height, chroma_format)
 
         # Create a temporary file to store the encoded bitstream
         self._annex_b_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.h264' if codec == 'h264' else '.hevc', delete=False)  # Keep the file for later processing
 
     def __del__(self):
-        if self._annex_b_file:
+        if self._annex_b_file is not None:
             self._annex_b_file.close()
             try:
                 # Cleanup the temporary file
@@ -337,12 +433,9 @@ class NVENCFrameRecorder:
             except OSError:
                 pass
 
-        if self._cuda_nv12_frame_mem:
-            self._cuda_nv12_frame_mem.free()
-            self._cuda_nv12_frame_mem = None
-        if self._cuda_tex_mem:
-            self._cuda_tex_mem.free()
-            self._cuda_tex_mem = None
+        if self._nvenc_frame is not None:
+            self._nvenc_frame.dispose()
+            self._nvenc_frame = None
 
     @property
     def texture_id(self) -> int:
@@ -367,15 +460,8 @@ class NVENCFrameRecorder:
         if not enabled:
             return
 
-        # Copy framebuffer texture to CUDA memory
-        self._plugin.copy_texture_to_cuda_memory_with_YUV_conversion(
-            self._frame_buffer.texture_id,
-            self._width,
-            self._height,
-            self._cuda_tex_mem.ptr,
-            self._cuda_tex_mem.pitch,
-            self._cuda_nv12_frame_mem.ptr,
-        )
+        # After exiting the context, process the current texture
+        self._nvenc_frame.process_current_texture(self._frame_buffer.texture_id)
 
         # Encode the frame using NVENC
         bitstream = self._encoder.Encode(self._nvenc_frame)

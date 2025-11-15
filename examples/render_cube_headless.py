@@ -140,7 +140,7 @@ def create_egl_context(width: int, height: int):
 @click.option("--height", default=1440, help="Window height")
 @click.option("--n_frames", default=500, help="Number of frames to render")
 @click.option("--out_dir", default="./outputs/render_cube_headless", help="Output directory to save the recorded video")
-@click.option("--fps", default=120.0, help="Frame rate limit")
+@click.option("--fps", default=60.0, help="Frame rate limit")
 @click.option("--rot_speed", default=60.0, help="Cube rotation speed in degrees per frame")
 @click.option("--nvenc", is_flag=True, help="Enable NVENC frame recording (requires NVIDIA GPU)")
 @click.option("--bitrate", default='10M', type=str, help="Bitrate for NVENC recorder (in bits per second)")

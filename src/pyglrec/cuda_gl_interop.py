@@ -488,7 +488,7 @@ def get_cuda_plugin():
     try:
         return _get_plugin_impl(
             'cuda_gl_interop',
-            ('cuda_gl_interop.cpp', 'rgba_to_nv12.cu'),
+            ('cuda_gl_interop.cpp', 'rgba_conversion.cu'),
             pathlib.Path(__file__).parent / 'custom_ops'
         )
     except Exception as e:

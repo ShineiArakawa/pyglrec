@@ -1,6 +1,6 @@
 [project]
 name = "pyglrec"
-version = "1.0.0"
+version = "1.1.0"
 description = "An OpenGL frame recorder with NVENC acceleration"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -21,7 +21,5 @@ requires = ["uv_build>=0.8.22,<0.9.0"]
 build-backend = "uv_build"
 
 [dependency-groups]
-develop = [
-    "opencv-python>=4.11.0.86",
-]
+develop = ["opencv-python>=4.11.0.86"]
 examples = ["click>=8.3.0", "glfw>=2.10.0", "pyglm>=2.8.2", "tqdm>=4.67.1"]

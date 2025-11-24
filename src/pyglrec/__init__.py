@@ -2,7 +2,7 @@
 pyglrec
 =======
 
-Render OpenGL scenes to PyTorch tensors using OpenGL-CUDA interoperability.
+An OpenGL frame recorder with NVENC acceleration.
 
 Contact
 -------

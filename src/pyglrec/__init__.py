@@ -33,6 +33,7 @@ except importlib.metadata.PackageNotFoundError:
 # ----------------------------------------------------------------------------
 # Import modules
 
+from .cuda_gl_interop import get_cuda_plugin
 from .frame_buffer import FrameBuffer
 from .frame_recorder import NVENCFrameRecorder, UncompressedFrameCPURecorder
 from .quad import Quad
@@ -48,6 +49,7 @@ __all__ = [
     'Quad',
     'UncompressedFrameCPURecorder',
     'NVENCFrameRecorder',
+    'get_cuda_plugin',
 ]
 
 # ----------------------------------------------------------------------------

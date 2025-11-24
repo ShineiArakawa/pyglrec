@@ -27,6 +27,8 @@ import click
 import cube_object
 import gl_utils
 import OpenGL.EGL as egl
+import OpenGL.EGL.EXT.device_base as egl_device_base
+import OpenGL.EGL.EXT.platform_device as egl_platform_device
 import OpenGL.GL as gl
 import OpenGL.platform as gl_platform
 import pyglm.glm as glm
@@ -56,9 +58,27 @@ else:
 # EGL context creation
 
 
-def create_egl_context(width: int, height: int):
+def create_egl_context(width: int, height: int, device_id: int | None = None):
+    if device_id is None:
+        device_id = 0
+    else:
+        plugin = pyglrec.get_cuda_plugin()
+        cuda_to_egl_map = plugin.get_cuda_to_egl_device_map()
+        if device_id not in cuda_to_egl_map:
+            raise RuntimeError(f"CUDA device ID {device_id} does not have EGL device mapping for CUDA/OpenGL interop.")
+        device_id = cuda_to_egl_map[device_id]
+
     # Get EGL display
-    display = egl.eglGetDisplay(egl.EGL_DEFAULT_DISPLAY)
+    max_num_devices = 16
+    devices = egl_device_base.egl_get_devices(max_num_devices)
+    assert len(devices) > device_id, f"Requested device_id {device_id} but only {len(devices)} devices found"
+
+    egl_device = devices[device_id]
+    print(f"Using EGL device {device_id} for EGL rendering context\n")
+
+    display = egl.eglGetPlatformDisplayEXT(egl_platform_device.EGL_PLATFORM_DEVICE_EXT, egl_device, None)
+
+    # display = egl.eglGetDisplay(egl.EGL_DEFAULT_DISPLAY)
     if display == egl.EGL_NO_DISPLAY:
         raise RuntimeError("eglGetDisplay failed")
 
@@ -145,6 +165,7 @@ def create_egl_context(width: int, height: int):
 @click.option("--nvenc", is_flag=True, help="Enable NVENC frame recording (requires NVIDIA GPU)")
 @click.option("--fmt", default='YUV444', type=click.Choice(['NV12', 'YUV444']), help="Chroma format for NVENC recorder")
 @click.option("--bitrate", default='10M', type=str, help="Bitrate for NVENC recorder (in bits per second)")
+@click.option("--device_id", default=None, type=int, help="EGL device ID to use for rendering. This needs CUDA/OpenGL interop support.")
 def main(**args):
     """Render a rotating colored cube using headless EGL context and record the frames to a video file.
     """
@@ -157,7 +178,7 @@ def main(**args):
     # --------------------------------------------------------------------------------------------
     # Create EGL context
 
-    display, surface, context = create_egl_context(window_width, window_height)
+    display, surface, context = create_egl_context(window_width, window_height, device_id=args.device_id)
 
     # --------------------------------------------------------------------------------------------
     # Camera setup

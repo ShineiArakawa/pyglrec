@@ -12,15 +12,22 @@
 #include <gl/GL.h>
 // clang-format on
 #else
+#define EGL_ENABLED
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GL/gl.h>
 #endif
 
 #include <cuda_gl_interop.h>
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>  // For type automatic conversion
 
+#include <cstring>
 #include <iostream>
+#include <map>
 #include <rgba_conversion.cuh>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <tuple>
 #include <utils.hpp>
@@ -72,6 +79,65 @@ int get_cuda_device_for_current_OpenGL_context() {
   }
 
   return selected_device;
+}
+
+std::map<int, int> get_cuda_to_egl_device_map() {
+#if defined(EGL_ENABLED)
+  // Get the number of cuda devices
+  int cuda_device_count = 0;
+  cudaErrors(cudaGetDeviceCount(&cuda_device_count));
+
+  // Get EGL devices
+  auto eglQueryDevicesEXT = reinterpret_cast<PFNEGLQUERYDEVICESEXTPROC>(eglGetProcAddress("eglQueryDevicesEXT"));
+  auto eglQueryDeviceAttribEXT = reinterpret_cast<PFNEGLQUERYDEVICEATTRIBEXTPROC>(eglGetProcAddress("eglQueryDeviceAttribEXT"));
+  auto eglQueryDeviceStringEXT = reinterpret_cast<PFNEGLQUERYDEVICESTRINGEXTPROC>(eglGetProcAddress("eglQueryDeviceStringEXT"));
+
+  if (!eglQueryDevicesEXT || !eglQueryDeviceAttribEXT || !eglQueryDeviceStringEXT) {
+    throw std::runtime_error("[get_cuda_to_egl_device_map] Required EGL extensions are not available (eglQueryDevicesEXT / eglQueryDeviceAttribEXT).");
+  }
+
+  const EGLint max_egl_devices = 16;
+  std::vector<EGLDeviceEXT> egl_devices(max_egl_devices, nullptr);
+  EGLint num_egl_devices = 0;
+
+  EGLBoolean ok = eglQueryDevicesEXT(max_egl_devices, egl_devices.data(), &num_egl_devices);
+  if (!ok || num_egl_devices <= 0) {
+    throw std::runtime_error("[get_cuda_to_egl_device_map] eglQueryDevicesEXT failed or returned no devices.");
+  }
+
+  // Get EGL devices
+  std::map<int, int> cuda_to_egl;
+
+  for (EGLint i = 0; i < num_egl_devices; ++i) {
+    EGLDeviceEXT dev = egl_devices[static_cast<size_t>(i)];
+    if (!dev) {
+      continue;
+    }
+
+    // Check
+    if (eglQueryDeviceStringEXT) {
+      const char* ext_str = eglQueryDeviceStringEXT(dev, EGL_EXTENSIONS);
+      if (!ext_str || std::strstr(ext_str, "EGL_NV_device_cuda") == nullptr) {
+        continue;
+      }
+    }
+
+    EGLAttrib cuda_dev_attr = -1;
+    if (!eglQueryDeviceAttribEXT(dev, EGL_CUDA_DEVICE_NV, &cuda_dev_attr)) {
+      continue;
+    }
+
+    int cuda_id = static_cast<int>(cuda_dev_attr);
+
+    if (0 <= cuda_id && cuda_id < cuda_device_count) {
+      cuda_to_egl[cuda_id] = static_cast<int>(i);
+    }
+  }
+
+  return cuda_to_egl;
+#else
+  throw std::runtime_error("EGL is not available!");
+#endif
 }
 
 // --------------------------------------------------------------------------------------------------------------------------------
@@ -362,4 +428,7 @@ PYBIND11_MODULE(cuda_gl_interop, m) {
         &set_cuda_device_for_current_OpenGL_context,
         "Set CUDA device for the current OpenGL context",
         pybind11::arg("device_id"));
+  m.def("get_cuda_to_egl_device_map",
+        &get_cuda_to_egl_device_map,
+        "Get a mapping from cuda device ids to EGL device ids map.");
 }

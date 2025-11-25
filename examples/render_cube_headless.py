@@ -161,6 +161,7 @@ def create_egl_context(width: int, height: int, device_id: int | None = None):
 @click.option("--n_frames", default=500, help="Number of frames to render")
 @click.option("--out_dir", default="./outputs/render_cube_headless", help="Output directory to save the recorded video")
 @click.option("--fps", default=60.0, help="Frame rate limit")
+@click.option("--out_fps", default=60.0, help="Output frame rate for recording")
 @click.option("--rot_speed", default=60.0, help="Cube rotation speed in degrees per frame")
 @click.option("--nvenc", is_flag=True, help="Enable NVENC frame recording (requires NVIDIA GPU)")
 @click.option("--fmt", default='YUV444', type=click.Choice(['NV12', 'YUV444']), help="Chroma format for NVENC recorder")
@@ -205,10 +206,11 @@ def main(**args):
     # --------------------------------------------------------------------------------------------
     # Create recorder
 
+    out_file = os.path.join(args.out_dir, 'output_headless_nvenc.mp4' if args.nvenc else 'output_headless.mp4')
     if args.nvenc:
-        recorder = pyglrec.NVENCFrameRecorder(window_width, window_height, fps=args.fps, avg_bitrate=args.bitrate, chroma_format=args.fmt)
+        recorder = pyglrec.NVENCFrameRecorder(window_width, window_height, out_file=out_file, fps=args.out_fps, avg_bitrate=args.bitrate, chroma_format=args.fmt)
     else:
-        recorder = pyglrec.UncompressedFrameCPURecorder(window_width, window_height, fps=args.fps, bitrate=args.bitrate)
+        recorder = pyglrec.UncompressedFrameCPURecorder(window_width, window_height, out_file=out_file, fps=args.out_fps, bitrate=args.bitrate)
 
     # --------------------------------------------------------------------------------------------
     # Setup states
@@ -258,12 +260,8 @@ def main(**args):
         rot_quaternion = rot_quaternion_x * rot_quaternion_y * rot_quaternion_z
         light_rot_mat = glm.mat4_cast(rot_quaternion)
 
-    if args.nvenc:
-        out_file = os.path.join(args.out_dir, f'output_headless_nvenc_{args.fmt}.mp4')
-    else:
-        out_file = os.path.join(args.out_dir, 'output_headless.mp4')
+    recorder.finalize()
 
-    recorder.finalize(out_file)
     print(f'Recorded video saved to: {out_file}')
 
     # --------------------------------------------------------------------------------------------

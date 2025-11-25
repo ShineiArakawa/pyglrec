@@ -6,17 +6,13 @@ Recorder classes for OpenGL frame data.
 """
 
 
+import abc
 import contextlib
-import os
 import pathlib
 import platform
 import subprocess
-import tempfile
-import threading
 import typing
 
-import cachetools
-import imageio
 import imageio_ffmpeg
 import numpy as np
 import OpenGL.GL as gl
@@ -31,21 +27,12 @@ import pyglrec.frame_buffer as frame_buffer
 import pyglrec.util as util
 
 # --------------------------------------------------------------------------------------------------------------
-# CPU Frame Recorder
+# Base Frame Recorder
 
 
-class UncompressedFrameCPURecorder:
-    """Recorder for uncompressed CPU frame data."""
-
-    def __init__(
-        self,
-        width: int,
-        height: int,
-        fps: int = 60,
-        bitrate: str = '30M',
-        cache_size: int = 512
-    ):
-        """Initialize the uncompressed frame recorder to record OpenGL frames. The recorder reads back frame data from the GPU to the CPU and saves them as a video file using FFmpeg.
+class FrameRecorderBase(metaclass=abc.ABCMeta):
+    def __init__(self, width: int, height: int):
+        """Initialize the base frame recorder.
 
         Parameters
         ----------
@@ -53,43 +40,168 @@ class UncompressedFrameCPURecorder:
             The width of the frames to record.
         height : int
             The height of the frames to record.
-        fps : int, optional
-            The frame rate of the recording, by default 60.
-        bitrate : str, optional
-            The target bitrate for the output video file, by default '30M'.
-        cache_size : int, optional
-            The number of frames to cache in memory before saving to disk, by default 512.
-
-        Example
-        -------
-        >>> recorder = UncompressedFrameCPURecorder(width=1920, height=1080, fps=30)
-        >>> with recorder.record():
-        ...     # OpenGL drawing calls here
-        >>> recorder.finalize("output.mp4")
         """
 
-        self._fps = fps
-        self._bitrate = bitrate
-
-        self._tmp_dir = tempfile.TemporaryDirectory()
-
+        self._width = width
+        self._height = height
         self._frame_buffer = frame_buffer.FrameBuffer(width, height)
 
-        self._cache_size = cache_size
-        self._frame_cache: dict[int, np.ndarray] = cachetools.FIFOCache(maxsize=2 * cache_size)
-        self._cur_frame_idx = 0
-
-        self._saving_thread: threading.Thread | None = None
-        self._lock = threading.Lock()
+        # On the fly ffmpeg muxer process and pipe
+        self._ffmpeg_proc: subprocess.Popen | None = None
+        self._ffmpeg_stdin: typing.IO | None = None
 
     def __del__(self):
-        self._tmp_dir.cleanup()
+        """Gracefully dispose of resources."""
+
+        if self._ffmpeg_proc is not None:
+            self._ffmpeg_stdin.close()
+            self._ffmpeg_stdin = None
+
+            self._ffmpeg_proc.terminate()
+            self._ffmpeg_proc = None
 
     @property
     def texture_id(self) -> int:
         """The OpenGL texture ID of the framebuffer's color attachment.
         """
         return self._frame_buffer.texture_id
+
+    @abc.abstractmethod
+    def _start_ffmpeg_muxer_proc(self) -> None:
+        """Start the FFmpeg muxer process for encoding and saving video."""
+        pass
+
+    @contextlib.contextmanager
+    def record(self, enabled: bool = True):
+        """Record a frame within the context.
+
+        Parameters
+        ----------
+        enabled : bool, optional
+            Whether to record the frame or not, by default True.
+        """
+
+        raise NotImplementedError("Subclasses must implement the 'record' method.")
+
+    @abc.abstractmethod
+    def finalize(self) -> None:
+        """Finalize the recording and save the video file."""
+        pass
+
+
+# --------------------------------------------------------------------------------------------------------------
+# CPU Frame Recorder
+
+
+class UncompressedFrameCPURecorder(FrameRecorderBase):
+    """Recorder for uncompressed CPU frame data with on-the-fly FFmpeg muxing."""
+
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        out_file: str | pathlib.Path,
+        fps: int = 60,
+        codec: typing.Literal['h264', 'hevc'] = 'hevc',
+        bitrate: str = '30M',
+        chroma_format: typing.Literal['YUV420', 'YUV422', 'YUV444'] = 'YUV444',
+    ):
+        """
+        Initialize the uncompressed frame recorder. Each frame is read back
+        from the GPU to CPU and sent as rawvideo to FFmpeg via stdin, which
+        encodes and muxes on-the-fly.
+
+        Parameters
+        ----------
+        width : int
+            The width of the frames to record.
+        height : int
+            The height of the frames to record.
+        out_file : str | pathlib.Path
+            The output video file path (e.g., 'output.mp4').
+        fps : int, optional
+            The frame rate of the recording, by default 60.
+        codec : typing.Literal['h264', 'hevc'], optional
+            The codec to use for encoding ('h264' or 'hevc'), by default 'hevc'.
+        bitrate : str, optional
+            The target bitrate for the output video file, by default '30M'.
+        chroma_format : typing.Literal['YUV420', 'YUV422', 'YUV444'], optional
+            The chroma subsampling format for encoding, by default 'YUV444'.
+
+        Example
+        -------
+        >>> recorder = UncompressedFrameCPURecorder(
+        ...     width=1920, height=1080,
+        ...     out_file="output.mp4", fps=30)
+        >>> for frame in range(300):
+        ...     with recorder.record():
+        ...         # OpenGL drawing calls here
+        ...         pass
+        >>> recorder.finalize()
+        """
+
+        super().__init__(width, height)
+
+        self._fps = fps
+        self._codec = codec
+        self._bitrate = bitrate
+        self._chroma_format = chroma_format
+
+        if isinstance(out_file, str):
+            out_file = pathlib.Path(out_file)
+        self._out_file = out_file.resolve()
+        self._out_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Start ffmpeg muxer process
+        self._start_ffmpeg_muxer_proc()
+
+    def __del__(self):
+        """Gracefully dispose of resources."""
+
+        super().__del__()
+
+    def _start_ffmpeg_muxer_proc(self) -> None:
+        """Start the FFmpeg muxer process for encoding and saving video."""
+
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+        # FFmpeg command to read raw RGBA frames from stdin and encode to MP4
+        codec = 'libx264' if self._codec == 'h264' else 'libx265'
+        pix_fmt = self._chroma_format.lower() + 'p'  # e.g., 'yuv444p'
+
+        cmd = [
+            ffmpeg_exe,
+            "-y",
+            # Input settings
+            "-f", "rawvideo",                       # Input format
+            "-pix_fmt", "rgba",                     # Input pixel format
+            "-s", f"{self._width}x{self._height}",  # Frame size
+            "-framerate", str(self._fps),           # Frame rate
+            "-i", "pipe:0",                         # Input from stdin
+            # Encoding settings
+            "-c:v", codec,                          # Video codec
+            "-b:v", str(self._bitrate),             # Target bitrate
+            "-g", "1",                              # GOP size = 1 (following original finalize settings)
+            "-color_range", "2",                    # full range
+            "-movflags", "+write_colr",             # Write color metadata
+            "-pix_fmt", pix_fmt,                    # Output pixel format
+            # Output settings
+            "-vsync", "cfr",                        # Constant frame rate
+            "-r", str(self._fps),                   # Output frame rate
+            str(self._out_file),
+        ]
+
+        self._ffmpeg_proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+
+        if self._ffmpeg_proc.stdin is None:
+            raise RuntimeError("Failed to open FFmpeg stdin")
+
+        self._ffmpeg_stdin = self._ffmpeg_proc.stdin
 
     @contextlib.contextmanager
     def record(self, enabled: bool = True):
@@ -122,79 +234,29 @@ class UncompressedFrameCPURecorder:
                 tex_data
             )
 
-        with self._lock:
-            self._frame_cache[self._cur_frame_idx] = np.flipud(tex_data)  # Flip vertically to match image coordinate system
+        tex_data = np.flipud(tex_data)  # Flip vertically to match image coordinate system
+        tex_data = tex_data.copy()      # Ensure data is contiguous
 
-        self._cur_frame_idx += 1
+        # Write raw frame data to ffmpeg stdin
+        self._ffmpeg_stdin.write(tex_data.tobytes())
 
-        with self._lock:
-            if len(self._frame_cache) > self._cache_size:
-                # Start a background thread to save frames to disk
-                if self._saving_thread is None or not self._saving_thread.is_alive():
-                    self._saving_thread = threading.Thread(target=self._save_frames_to_disk)
-                    self._saving_thread.start()
+    def finalize(self) -> None:
+        """Finalize the recording and save all frames to a video file."""
 
-    def _save_frames_to_disk(self, num: int | None = None) -> None:
-        if num == 0:
+        if self._ffmpeg_proc is None:
             return
 
-        with self._lock:
-            num = min(num or self._cache_size, len(self._frame_cache))
-            frame_indices = list(self._frame_cache.keys())[:num]
+        self._ffmpeg_stdin.flush()
+        self._ffmpeg_stdin.close()
 
-        frames = []
-        for frame_idx in frame_indices:
-            with self._lock:
-                frame_data = self._frame_cache.pop(frame_idx)
-            frames.append(frame_data)
+        # Wait for ffmpeg process to finish
+        ret = self._ffmpeg_proc.wait()
+        if ret != 0:
+            msg = f"FFmpeg process failed with return code {ret}.\n"
+            raise RuntimeError(msg)
 
-        np.savez(os.path.join(self._tmp_dir.name, f"frames_{frame_indices[0]:08d}_{frame_indices[-1]:08d}.npz"), *frames)
-
-    def finalize(self, out_file: str | pathlib.Path) -> None:
-        """Finalize the recording and save all frames to a video file.
-
-        Parameters
-        ----------
-        out_file : str | pathlib.Path
-            The output video file path.
-        """
-
-        if isinstance(out_file, str):
-            out_file = pathlib.Path(out_file)
-        out_file = out_file.resolve()
-
-        # Wait for any ongoing saving thread to finish
-        if self._saving_thread is not None:
-            self._saving_thread.join()
-
-        # Save any remaining frames in the cache
-        self._save_frames_to_disk(num=len(self._frame_cache))
-
-        # Gather all saved .npz files
-        npz_files = sorted([f for f in os.listdir(self._tmp_dir.name) if f.endswith('.npz')])
-
-        if len(npz_files) > 0:
-            # Create writer
-            out_file.parent.mkdir(parents=True, exist_ok=True)
-
-            pix_format = 'yuv420p'
-            ffmpeg_args = []
-            ffmpeg_args += ['-g', '1']  # Set GOP size to 1 for lossless encoding
-            ffmpeg_args += ['-color_range', '2']  # Set color range to full
-            ffmpeg_args += ['-movflags', '+write_colr']  # Write color profile
-            ffmpeg_kwargs = dict(bitrate=self._bitrate, pixelformat=pix_format, output_params=ffmpeg_args)
-            writer = imageio.get_writer(str(out_file), format='ffmpeg', mode='I', fps=self._fps, codec='libx265', **ffmpeg_kwargs)
-
-            for npz_file in npz_files:
-                data = np.load(os.path.join(self._tmp_dir.name, npz_file))
-                for i in range(len(data.files)):
-                    frame = data[f'arr_{i}']
-                    writer.append_data(frame)
-
-            writer.close()
-        else:
-            print("No frames were recorded; skipping video file creation.")
-
+        self._ffmpeg_proc = None
+        self._ffmpeg_stdin = None
 
 # --------------------------------------------------------------------------------------------------------------
 # GPU Frame Recorder enhanced by NVENC
@@ -337,16 +399,17 @@ class NVENCInputFrame:
             raise ValueError(f"Unsupported format: {self._fmt}")
 
 
-class NVENCFrameRecorder:
+class NVENCFrameRecorder(FrameRecorderBase):
     """Recorder for GPU frame data using NVENC encoder."""
 
     def __init__(
         self,
         width: int,
         height: int,
+        out_file: str | pathlib.Path,
         fps: int = 60,
         codec: typing.Literal['h264', 'hevc'] = 'hevc',
-        preset: typing.Literal['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] | None = None,
+        preset: typing.Literal['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] = 'P1',
         avg_bitrate: int | str = '20M',  # 20 Mbps
         max_bitrate: int | str = '30M',  # 30 Mbps
         chroma_format: typing.Literal['NV12', 'YUV444'] = 'YUV444',
@@ -360,17 +423,19 @@ class NVENCFrameRecorder:
             The width of the frames to record.
         height : int
             The height of the frames to record.
+        out_file : str | pathlib.Path
+            The output MP4 video file path.
         fps : int, optional
             The frame rate of the recording, by default 60.
         codec : typing.Literal['h264', 'hevc'], optional
             The codec to use for encoding ('h264' or 'hevc'), by default 'hevc'.
-        preset : typing.Literal['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'] | None,
-            The NVENC preset to use ('P1' to 'P7'), by default None.
+        preset : typing.Literal['P1', 'P2', 'P3', 'P4', 'P5', 'P6', 'P7'], optional
+            The NVENC preset to use ('P1' to 'P7'), by default 'P3'.
         avg_bitrate : int, optional
             The average bitrate for encoding in bits per second, by default 20_000_000 (20 Mbps).
         max_bitrate : int, optional
             The maximum bitrate for encoding in bits per second, by default 30_000_000 (30 Mbps).
-        chroma_format: typing.Literal['NV12', 'YUV444'] = 'YUV444',
+        chroma_format: typing.Literal['NV12', 'YUV444'], optional
             The chroma subsampling format for encoding ('NV12' or 'YUV444'), by default 'YUV444'.
         rate_control_mode : typing.Literal['cbr', 'vbr', 'constqp'], optional
             The rate control mode ('cbr', 'vbr', or 'constqp'), by default 'vbr'.
@@ -385,15 +450,16 @@ class NVENCFrameRecorder:
         >>> recorder = NVENCFrameRecorder(width=1920, height=1080, fps=30, codec='h264')
         >>> with recorder.record():
         ...     # OpenGL drawing calls here
-        >>> recorder.finalize("output.mp4")
+        >>> recorder.finalize()
         """
 
         # Check if nvcodec is available
         if nvcodec is None:
             raise RuntimeError("PyNvVideoCodec is not available. NVENC is not supported on this platform.")
 
-        self._width = width
-        self._height = height
+        super().__init__(width, height)
+
+        self._out_file = out_file
         self._fps = fps
         self._codec = codec
 
@@ -402,17 +468,12 @@ class NVENCFrameRecorder:
         if self._plugin is None:
             raise RuntimeError("CUDA-OpenGL interop plugin is not available. Check if 'nvcc' is installed and configured correctly.")
 
-        self._frame_buffer = frame_buffer.FrameBuffer(width, height)
-
         # Get and set CUDA device for the current OpenGL context
         cuda_device_id = int(self._plugin.get_cuda_device_for_current_OpenGL_context())
-        self._plugin.set_cuda_device_for_current_OpenGL_context(cuda_device_id)
-        print(f"Using CUDA device ID {cuda_device_id} for NVENC encoding.")
+        self._plugin.set_cuda_device_for_current_OpenGL_context(cuda_device_id)  # Set the same device as current OpenGL context
 
         # Initialize NVENC encoder
-        encoder_opts = util.EasyDict()
-        if preset is not None:
-            encoder_opts.preset = preset  # Preset ('P1' to 'P7')
+        encoder_opts = util.EasyDict(preset=preset)
 
         self._encoder = nvcodec.CreateEncoder(
             gpu_id=cuda_device_id,
@@ -435,30 +496,53 @@ class NVENCFrameRecorder:
         # Initialize AppFrame for NV12 format
         self._nvenc_frame = NVENCInputFrame(width, height, chroma_format)
 
-        # Create a temporary file to store the encoded bitstream
-        self._annex_b_file = tempfile.NamedTemporaryFile(mode='wb', suffix='.h264' if codec == 'h264' else '.hevc', delete=False)  # Keep the file for later processing
+        # Start ffmpeg muxer process
+        self._start_ffmpeg_muxer_proc()
 
     def __del__(self):
-        """Dispose of resources upon deletion."""
-
-        if self._annex_b_file is not None:
-            self._annex_b_file.close()
-            try:
-                # Cleanup the temporary file
-                os.remove(self._annex_b_file.name)
-                self._annex_b_file = None
-            except OSError:
-                pass
+        """Gracefully dispose of resources."""
 
         if self._nvenc_frame is not None:
             self._nvenc_frame.dispose()
             self._nvenc_frame = None
 
-    @property
-    def texture_id(self) -> int:
-        """The OpenGL texture ID of the framebuffer's color attachment.
-        """
-        return self._frame_buffer.texture_id
+        super().__del__()
+
+    def _start_ffmpeg_muxer_proc(self) -> None:
+        if isinstance(self._out_file, str):
+            self._out_file = pathlib.Path(self._out_file)
+        self._out_file = self._out_file.resolve()
+        self._out_file.parent.mkdir(parents=True, exist_ok=True)
+
+        ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+
+        input_fmt = 'h264' if self._codec == 'h264' else 'hevc'
+        cmd = [
+            ffmpeg_exe,
+            '-y',                                   # Overwrite output file if it exists
+            # Input settings
+            '-f', input_fmt,                        # Input Annex-B format
+            '-framerate', str(self._fps),           # Frame rate
+            '-i', 'pipe:0',                         # Input from stdin
+            # Output settings
+            '-c:v', 'copy',                         # Copy without re-encoding
+            '-vsync', 'cfr',                        # Constant frame rate
+            '-r', str(self._fps),                   # Output frame rate
+            '-an',
+            str(self._out_file),
+        ]
+
+        self._ffmpeg_proc = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        if self._ffmpeg_proc.stdin is None:
+            raise RuntimeError("Failed to open ffmpeg stdin")
+
+        self._ffmpeg_stdin = self._ffmpeg_proc.stdin
 
     @contextlib.contextmanager
     def record(self, enabled: bool = True):
@@ -484,54 +568,32 @@ class NVENCFrameRecorder:
         bitstream = self._encoder.Encode(self._nvenc_frame)
         bitstream = bytearray(bitstream)
 
-        # Write the encoded bitstream to the temporary file
-        self._annex_b_file.write(bitstream)
+        # Write the encoded bitstream to the ffmpeg stdin for muxing
+        self._ffmpeg_stdin.write(bitstream)
 
-    def finalize(self, out_file: str | pathlib.Path) -> None:
-        """Finalize the recording and save the encoded video to a file.
+    def finalize(self) -> None:
+        """Finalize the recording and save the encoded video to a file."""
 
-        Parameters
-        ----------
-        out_file : str | pathlib.Path
-            The output video file path.
-        """
-
-        if isinstance(out_file, str):
-            out_file = pathlib.Path(out_file)
-        out_file = out_file.resolve()
+        if self._ffmpeg_proc is None:
+            return
 
         # Flush the encoder to process any remaining frames
         bitstream = self._encoder.EndEncode()
         bitstream = bytearray(bitstream)
-        self._annex_b_file.write(bitstream)
 
-        # Ensure all data is written to the temporary file
-        self._annex_b_file.flush()
-        self._annex_b_file.close()  # Close to ensure data is written
+        if len(bitstream) > 0:
+            # Write the final encoded bitstream to the ffmpeg stdin for muxing
+            self._ffmpeg_stdin.write(bitstream)
 
-        if os.path.getsize(self._annex_b_file.name) > 0:
-            # Create output directory if it doesn't exist
-            out_file.parent.mkdir(parents=True, exist_ok=True)
+        self._ffmpeg_stdin.flush()
+        self._ffmpeg_stdin.close()
 
-            # Convert the Annex B bitstream to MP4 container using imageio
-            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+        # Wait for ffmpeg process to finish
+        ret = self._ffmpeg_proc.wait()
+        if ret != 0:
+            msg = f"FFmpeg process failed with return code {ret}.\n"
+            raise RuntimeError(msg)
 
-            cmd = [
-                ffmpeg_exe,
-                '-y',                                     # Overwrite output file if it exists
-                '-r', str(self._fps),                     # Input frame rate
-                '-i', self._annex_b_file.name,            # Input file (Annex B bitstream)
-                '-c:v', 'copy',                           # Copy the video stream without re-encoding
-                '-an',                                    # No audio
-                str(out_file),
-            ]
-
-            try:
-                subprocess.run(cmd, check=True)
-            except subprocess.CalledProcessError as e:
-                raise RuntimeError(f"FFmpeg failed to convert Annex B bitstream to MP4: {e}") from e
-        else:
-            print("No frames were recorded; skipping video file creation.")
-
+        self._ffmpeg_proc = None
 
 # --------------------------------------------------------------------------------------------------------------

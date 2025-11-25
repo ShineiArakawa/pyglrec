@@ -48,7 +48,8 @@ rot_speed = 60.0  # degrees per second
 @click.option("--width", default=2560, help="Window width")
 @click.option("--height", default=1440, help="Window height")
 @click.option("--out_dir", default="./outputs/render_cube", help="Output directory to save the recorded video")
-@click.option("--fps_limit", default=60.0, help="Frame rate limit")
+@click.option("--fps", default=60.0, help="Frame rate limit")
+@click.option("--out_fps", default=60.0, help="Output frame rate for recording")
 @click.option("--nvenc", is_flag=True, help="Enable NVENC frame recording (requires NVIDIA GPU)")
 @click.option("--disabled", is_flag=True, help="Disable frame recording")
 def main(**args):
@@ -137,7 +138,8 @@ def main(**args):
     # --------------------------------------------------------------------------------------------
     # Create recorder
 
-    recorder = (pyglrec.NVENCFrameRecorder if args.nvenc else pyglrec.UncompressedFrameCPURecorder)(window_width, window_height)
+    out_file = os.path.join(args.out_dir, 'output_nvenc.mp4' if args.nvenc else 'output.mp4')
+    recorder = (pyglrec.NVENCFrameRecorder if args.nvenc else pyglrec.UncompressedFrameCPURecorder)(window_width, window_height, out_file, fps=args.out_fps)
 
     # --------------------------------------------------------------------------------------------
     # Setup states
@@ -167,15 +169,17 @@ def main(**args):
     # --------------------------------------------------------------------------------------------
     # Main loop
 
-    start_time = time.monotonic()
     prev_time = time.monotonic()
+
+    animation_time = 0.0
+    delta_time = 1.0 / args.out_fps
 
     while not glfw.window_should_close(window):
         glfw.poll_events()
 
         # Limit frame rate
         cur_time = time.monotonic()
-        if (cur_time - prev_time) > (1.0 / args.fps_limit):
+        if (cur_time - prev_time) > (1.0 / args.fps):
             # Compute transformation matrices
             model_mat = model_trans_mat * model_rot_mat * model_scale_mat
             mv_mat = view_mat * model_mat
@@ -196,9 +200,9 @@ def main(**args):
             quad_obj.draw(recorder.texture_id, int(window_width * dpi_scale_x), int(window_height * dpi_scale_y))
 
             # Animate cube
-            angle_x = math.sin((cur_time - start_time) * 0.6) * rot_speed
-            angle_y = math.sin((cur_time - start_time) * 0.9) * rot_speed
-            angle_z = math.sin((cur_time - start_time) * 1.1) * rot_speed
+            angle_x = math.sin(animation_time * 0.6) * rot_speed
+            angle_y = math.sin(animation_time * 0.9) * rot_speed
+            angle_z = math.sin(animation_time * 1.1) * rot_speed
 
             rot_quaternion_x = glm.angleAxis(glm.radians(angle_x), glm.vec3(1.0, 0.0, 0.0))
             rot_quaternion_y = glm.angleAxis(glm.radians(angle_y), glm.vec3(0.0, 1.0, 0.0))
@@ -207,9 +211,9 @@ def main(**args):
             model_rot_mat = glm.mat4_cast(rot_quaternion)
 
             # Also rotate light at different speed
-            angle_x = math.sin((cur_time - start_time) * 1.5) * rot_speed
-            angle_y = math.sin((cur_time - start_time) * 1.8) * rot_speed
-            angle_z = math.sin((cur_time - start_time) * 2.1) * rot_speed
+            angle_x = math.sin(animation_time * 1.5) * rot_speed
+            angle_y = math.sin(animation_time * 1.8) * rot_speed
+            angle_z = math.sin(animation_time * 2.1) * rot_speed
 
             rot_quaternion_x = glm.angleAxis(glm.radians(angle_x), glm.vec3(1.0, 0.0, 0.0))
             rot_quaternion_y = glm.angleAxis(glm.radians(angle_y), glm.vec3(0.0, 1.0, 0.0))
@@ -221,9 +225,9 @@ def main(**args):
             glfw.swap_buffers(window)
 
             prev_time = cur_time
+            animation_time += delta_time
 
-    out_file = os.path.join(args.out_dir, 'output_nvenc.mp4' if args.nvenc else 'output.mp4')
-    recorder.finalize(out_file)
+    recorder.finalize()
     print(f'Recorded video saved to: {out_file}')
 
     # --------------------------------------------------------------------------------------------

@@ -54,10 +54,11 @@ WIDTH, HEIGHT = 1920, 1080
 recorder = NVENCFrameRecorder(
     width=WIDTH,
     height=HEIGHT,
+    out_file="outputs/demo.mp4",
     fps=60,
     avg_bitrate=20_000_000,
     codec="hevc",         # "h264" or "hevc"
-    preset="P4",          # Optional NVENC preset (P1=fast ... P7=quality)
+    preset="P4",          # Optional NVENC preset
 )
 
 # If you do not have NVENC hardware, fall back to:
@@ -74,12 +75,12 @@ while not glfw.window_should_close(window):
     # Optionally blit to the default framebuffer using recorder.texture_id
     swap_buffers()
 
-recorder.finalize("outputs/demo.mp4")
+recorder.finalize()
 ```
 
 - `recorder.record()` wraps the draw pass that should be captured.
 - The framebuffer is multisampled internally; the resolved texture ID is exposed via `recorder.texture_id` for preview quads or blitting.
-- `finalize(path)` flushes threads/encoders and produces either an MP4 (NVENC) or FFmpeg-encoded video from saved raw frames (CPU recorder).
+- `finalize()` flushes threads/encoders and produces either an MP4 (NVENC) or FFmpeg-encoded video from saved raw frames (CPU recorder).
 
 ## Examples
 

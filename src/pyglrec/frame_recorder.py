@@ -50,15 +50,20 @@ class FrameRecorderBase(metaclass=abc.ABCMeta):
         self._ffmpeg_proc: subprocess.Popen | None = None
         self._ffmpeg_stdin: typing.IO | None = None
 
-    def __del__(self):
+    def dispose(self):
         """Gracefully dispose of resources."""
 
-        if self._ffmpeg_proc is not None:
+        if self._ffmpeg_stdin is not None:
             self._ffmpeg_stdin.close()
             self._ffmpeg_stdin = None
 
+        if self._ffmpeg_proc is not None:
             self._ffmpeg_proc.terminate()
             self._ffmpeg_proc = None
+
+        if self._frame_buffer is not None:
+            self._frame_buffer.dispose()
+            self._frame_buffer = None
 
     @property
     def texture_id(self) -> int:
@@ -346,6 +351,7 @@ class NVENCInputFrame:
         if self._cuda_frame_mem:
             self._cuda_frame_mem.free()
             self._cuda_frame_mem = None
+
         if self._cuda_tex_mem:
             self._cuda_tex_mem.free()
             self._cuda_tex_mem = None
@@ -499,14 +505,14 @@ class NVENCFrameRecorder(FrameRecorderBase):
         # Start ffmpeg muxer process
         self._start_ffmpeg_muxer_proc()
 
-    def __del__(self):
+    def dispose(self):
         """Gracefully dispose of resources."""
 
         if self._nvenc_frame is not None:
             self._nvenc_frame.dispose()
             self._nvenc_frame = None
 
-        super().__del__()
+        super().dispose()
 
     def _start_ffmpeg_muxer_proc(self) -> None:
         if isinstance(self._out_file, str):
@@ -571,8 +577,14 @@ class NVENCFrameRecorder(FrameRecorderBase):
         # Write the encoded bitstream to the ffmpeg stdin for muxing
         self._ffmpeg_stdin.write(bitstream)
 
-    def finalize(self) -> None:
-        """Finalize the recording and save the encoded video to a file."""
+    def finalize(self, dispose: bool = True) -> None:
+        """Finalize the recording and save the encoded video to a file.
+
+        Parameters
+        ----------
+        dispose : bool, optional
+            Whether to dispose of resources after finalization, by default True.
+        """
 
         if self._ffmpeg_proc is None:
             return
@@ -594,6 +606,8 @@ class NVENCFrameRecorder(FrameRecorderBase):
             msg = f"FFmpeg process failed with return code {ret}.\n"
             raise RuntimeError(msg)
 
-        self._ffmpeg_proc = None
+        if dispose:
+            self.dispose()
+
 
 # --------------------------------------------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 [project]
 name = "pyglrec"
-version = "1.1.0"
+version = "1.2.0"
 description = "An OpenGL frame recorder with NVENC acceleration"
 readme = "README.md"
 license = { file = "LICENSE" }
